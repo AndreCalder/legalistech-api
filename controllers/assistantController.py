@@ -17,7 +17,9 @@ from controllers.token_balance_controller import Token_Balance_Controller
 from datetime import datetime
 from tempfile import NamedTemporaryFile
 from pinecone.grpc import PineconeGRPC as Pinecone
+from dotenv import load_dotenv
 
+load_dotenv()
 eventController = EventController()
 tkbController = Token_Balance_Controller()
 
