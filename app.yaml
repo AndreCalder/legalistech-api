@@ -1,0 +1,27 @@
+runtime: python39  # or python38 or python310, depending on your needs
+
+entrypoint: gunicorn -b :8080 main:app -t 1800 --keep-alive 1800  # Assuming your Flask app instance is named 'app' in 'main.py'
+
+instance_class: F1  # Use a smaller instance class for lower traffic
+
+automatic_scaling:
+  min_instances: 0  # No instances running when there's no traffic
+  max_instances: 1  # Only one instance for low traffic
+  target_cpu_utilization: 0.6  # Slightly higher CPU utilization target to reduce costs
+  target_throughput_utilization: 0.7  # Slightly higher throughput utilization target to reduce costs
+
+inbound_services:
+- warmup
+
+env_variables:
+  MONGO_URI: mongodb+srv://andrecalder98:LFgw87KNYZ2OjZOK@qgo.xywmfco.mongodb.net/?retryWrites=true&w=majority&appName=qGo
+  ACCESS_TOKEN_SECRET: NAdLExsZag2dcIfzUYYsUE7r8b8qvpbyMSa7vX0LPTE
+  REFRESH_TOKEN_SECRET: oCpn8bWykq3NIwIL3osX6uZIFAKnGjRtntsuHPgs_PE
+  PINECONE_API_KEY: pcsk_4TyhqV_TNYtKP4QLdWagKNAX3STWoxbcuyPei7p4XEME9sWeSSBomENBWZ3iJeLEyM4tU4
+  PORT: 8080
+  STRIPE_ENDPOINT_SECRET: whsec_dl2If2AGWBAfSutVigE2J5XvHB5fQhVP
+
+handlers:
+
+- url: /.*
+  script: auto

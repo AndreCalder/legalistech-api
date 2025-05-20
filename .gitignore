@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Environment variables
+.env
+.env.*
+
+# macOS
+.DS_Store
+
+# Editors
+.vscode/
+.idea/
+
+pinereadtest.py
+pinetest.py
+
+mlai-434520-4c43418dba13.json
+controllers/util/service_key.json
