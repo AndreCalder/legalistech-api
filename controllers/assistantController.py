@@ -99,7 +99,7 @@ class AssistantController:
 
         msg = request.form.get("msg")
         uploaded_file = None
-
+        
         if request.files:
             uploaded_file = request.files["file"]
 
@@ -204,8 +204,6 @@ class AssistantController:
         if len(response.candidates) > 0:
             if len(response.candidates[0].function_calls) == 0:
                 botmsg = response.candidates[0].text
-            else:
-                print("a")
                 # TODO: Implement function call handling
         else:
             botmsg = response.text

@@ -23,7 +23,6 @@ class UserController:
             subscription = subs.data[0]
             user["subscription"] = subscription
 
-            print(subscription)
             subPack = subscriptions.find_one({"priceId": subscription.plan.id})
 
             user["subPack"] = subPack

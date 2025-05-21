@@ -1,7 +1,6 @@
 from bson import ObjectId
 import pymongo
 import certifi
-from os import environ
 
 client = pymongo.MongoClient(
     "mongodb+srv://andrecalder98:LFgw87KNYZ2OjZOK@qgo.xywmfco.mongodb.net/?retryWrites=true&w=majority&appName=qGo",
@@ -63,11 +62,14 @@ def categorizar_caso(tipo_caso):
     for categoria, palabras_clave in categorias.items():
         if any(palabra in tipo_caso for palabra in palabras_clave):
             return categoria
-    print(" ============ " + tipo_caso + " ============ ")
+
     return "Otros"
 
 
 for sentencia in sentencias.find():
     tipo_caso = sentencia["case_info"]["case_type"]
     categoria = categorizar_caso(tipo_caso)
-    sentencias.update_one({"_id": ObjectId(sentencia["_id"])},{"$set": {"case_info.case_type": categoria}})
+    sentencias.update_one(
+        {"_id": ObjectId(sentencia["_id"])},
+        {"$set": {"case_info.case_type": categoria}},
+    )

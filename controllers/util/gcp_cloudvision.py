@@ -1,5 +1,4 @@
 from google.cloud import vision
-from google.cloud.vision_v1 import types
 import io
 import base64
 from controllers.util.pdftoimg import pdf_to_images
@@ -55,4 +54,4 @@ os.makedirs(output_folder, exist_ok=True)
 
 def scan_pdf_to_text(pdf_file):
     images = pdf_to_images(pdf_file)
-    return send_images_to_vision(images[:-2])
+    return send_images_to_vision(images)

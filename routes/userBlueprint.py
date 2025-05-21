@@ -14,7 +14,7 @@ def validate_token():
     ):
         return
     token_data = tokenController.check_token(request.headers["Authorization"])
-    
+
     if not token_data.get("isValid"):
         return {"message": "Invalid token"}, 401
 
@@ -50,5 +50,7 @@ def getUser():
 @user_Router.route("/update/<id>", methods=["PUT"])
 def updateUser(id):
     data = request.json
-    data["user_id"] = id
+    data["user_id"] = {
+        "$oid": id
+    }
     return userController.update_user(data)
