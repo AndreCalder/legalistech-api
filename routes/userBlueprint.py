@@ -50,7 +50,5 @@ def getUser():
 @user_Router.route("/update/<id>", methods=["PUT"])
 def updateUser(id):
     data = request.json
-    data["user_id"] = {
-        "$oid": id
-    }
+    data["user_id"] = {"$oid": id}
     return userController.update_user(data)

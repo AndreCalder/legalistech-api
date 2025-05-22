@@ -3,15 +3,16 @@
 import json
 import os
 import datetime
-import random
 from bson import ObjectId, json_util
+from controllers.pinsController import generate_pin_for_user
 from mongoConnection import db
 import bcrypt
 import stripe
 
-users         = db["users"]
+users = db["users"]
 subscriptions = db["subscriptions"]
-pins          = db["pins"]
+pins = db["pins"]
+
 
 class UserController:
 
@@ -35,16 +36,6 @@ class UserController:
         user = users.find_one({"email": email})
         return json.loads(json_util.dumps(user))
 
-    def create_student(self, username, enrollment):
-        user = self.get_user(username)
-        if user:
-            return {"message": "User already exists"}, 400
-
-        createduser = users.insert_one(
-            {"username": username, "enrollment": enrollment}
-        )
-        return {"userId": str(createduser.inserted_id)}, 200
-
     def create_user(self, email, password):
         user = self.get_user(email)
         if user:
@@ -54,28 +45,20 @@ class UserController:
         hashedpass = bcrypt.hashpw(password.encode("utf-8"), salt).decode("utf-8")
 
         # insert user and grab the new ObjectId
-        created_id = users.insert_one({
-            "email":     email,
-            "password":  hashedpass,
-            "verified":  False,
-            "created_at": datetime.datetime.now(datetime.timezone.utc)
-        }).inserted_id
+        created_id = users.insert_one(
+            {
+                "email": email,
+                "password": hashedpass,
+                "verified": False,
+                "created_at": datetime.datetime.now(datetime.timezone.utc),
+            }
+        ).inserted_id
 
-        # Generate and store PIN
-        pin_code = f"{random.randint(1000, 9999)}"
-        pins.insert_one({
-            "user_id":    created_id,
-            "pin_code":   pin_code,
-            "created_at": datetime.datetime.now(datetime.timezone.utc),
-            "PIN_used":   False
-        })
+        generate_pin_for_user(str(created_id))
 
         # TODO: send pin_code via email here
 
-        return {
-            "userId":   str(created_id),
-            "pin_code": pin_code
-        }, 201
+        return {"userId": str(created_id)}, 200
 
     def update_user(self, data):
         try:

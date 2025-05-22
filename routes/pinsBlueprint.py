@@ -3,9 +3,10 @@ from controllers.pinsController import generate_pin_for_user, verify_user_pin
 
 pins_bp = Blueprint("pins", __name__)
 
+
 @pins_bp.route("/", methods=["POST"])
 def create_pin():
-    data    = request.get_json(force=True) or {}
+    data = request.get_json(force=True) or {}
     user_id = data.get("user_id")
     if not user_id:
         return {"error": "user_id is required"}, 400
@@ -18,10 +19,11 @@ def create_pin():
     # TODO: integrate email sending here
     return {"message": "PIN generated", "pin_code": pin}, 201
 
+
 @pins_bp.route("/verify", methods=["POST"])
 def verify_pin():
-    data     = request.get_json(force=True) or {}
-    user_id  = data.get("user_id")
+    data = request.get_json(force=True) or {}
+    user_id = data.get("user_id")
     pin_code = data.get("pin_code")
     if not user_id or not pin_code:
         return {"error": "user_id and pin_code are required"}, 400
