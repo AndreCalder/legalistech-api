@@ -44,6 +44,9 @@ class AssistantController:
         body["user_id"] = ObjectId(g.userId)
         body["history"] = []
         body["name"] = "Sesión - " + datetime.now().strftime("%d/%m/%Y")
+        body["created_at"] = datetime.now()
+        body["updated_at"] = datetime.now()
+
         savedSession = sessions.insert_one(body).inserted_id
 
         return str(savedSession)
@@ -98,8 +101,9 @@ class AssistantController:
     def chatSession(self, id, request):
 
         msg = request.form.get("msg")
+        print(msg)
         uploaded_file = None
-        
+
         if request.files:
             uploaded_file = request.files["file"]
 
@@ -108,6 +112,11 @@ class AssistantController:
             "user_question": msg,
             "timestamp": datetime.now(),
         }
+
+        if uploaded_file:
+            message_obj["file_url"] = request.form.get("file_url")
+            message_obj["file_name"] = request.form.get("file_name")
+            message_obj["file_type"] = request.form.get("file_type")
 
         session = sessions.find_one({"_id": ObjectId(id)})
         history = session.get("history")

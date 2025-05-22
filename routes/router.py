@@ -8,9 +8,9 @@ from routes.subBlueprint import sub_Router
 
 router = Blueprint("router", __name__)
 
-router.register_blueprint(auth_Router, url_prefix="/auth")
-router.register_blueprint(user_Router, url_prefix="/users")
-router.register_blueprint(assistant_Router, url_prefix="/assistant")
-router.register_blueprint(consult_Router, url_prefix="/search")
-router.register_blueprint(payment_Router, url_prefix="/payment")
-router.register_blueprint(sub_Router, url_prefix="/sub")
+router.register_blueprint(auth_Router, url_prefix="/auth")  # Authentication routes
+router.register_blueprint(user_Router, url_prefix="/users")  # User routes
+router.register_blueprint(assistant_Router, url_prefix="/assistant")  # Chat routes
+router.register_blueprint(consult_Router, url_prefix="/search")  # Smart search routes
+router.register_blueprint(payment_Router, url_prefix="/payment")  # Payment routes
+router.register_blueprint(sub_Router, url_prefix="/sub")  # Subscription routes
