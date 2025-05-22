@@ -1,13 +1,17 @@
+# backend/app/controllers/userController.py
+
 import json
 import os
+import datetime
+import random
 from bson import ObjectId, json_util
 from mongoConnection import db
 import bcrypt
 import stripe
 
-users = db["users"]
+users         = db["users"]
 subscriptions = db["subscriptions"]
-
+pins          = db["pins"]
 
 class UserController:
 
@@ -16,7 +20,6 @@ class UserController:
 
         # Add subscription data to user
         customer_id = user.get("customer_id")
-
         if customer_id:
             stripe.api_key = os.getenv("STRIPE_SECRET")
             subs = stripe.Subscription.list(customer=customer_id)
@@ -24,7 +27,6 @@ class UserController:
             user["subscription"] = subscription
 
             subPack = subscriptions.find_one({"priceId": subscription.plan.id})
-
             user["subPack"] = subPack
 
         return json.loads(json_util.dumps(user))
@@ -35,34 +37,49 @@ class UserController:
 
     def create_student(self, username, enrollment):
         user = self.get_user(username)
-
         if user:
             return {"message": "User already exists"}, 400
 
-        createduser = users.insert_one({"username": username, "enrollment": enrollment})
+        createduser = users.insert_one(
+            {"username": username, "enrollment": enrollment}
+        )
         return {"userId": str(createduser.inserted_id)}, 200
 
     def create_user(self, email, password):
         user = self.get_user(email)
-
         if user:
             return {"message": "Este usuario ya fue registrado"}, 400
 
         salt = bcrypt.gensalt(10)
-        hashedpass = bcrypt.hashpw(password.encode("utf-8"), salt)
-        createduser = users.insert_one(
-            {
-                "email": email,
-                "password": hashedpass.decode("utf-8"),
-            }
-        ).inserted_id
+        hashedpass = bcrypt.hashpw(password.encode("utf-8"), salt).decode("utf-8")
 
-        return {"userId": str(createduser)}, 200
+        # insert user and grab the new ObjectId
+        created_id = users.insert_one({
+            "email":     email,
+            "password":  hashedpass,
+            "verified":  False,
+            "created_at": datetime.datetime.now(datetime.timezone.utc)
+        }).inserted_id
+
+        # Generate and store PIN
+        pin_code = f"{random.randint(1000, 9999)}"
+        pins.insert_one({
+            "user_id":    created_id,
+            "pin_code":   pin_code,
+            "created_at": datetime.datetime.now(datetime.timezone.utc),
+            "PIN_used":   False
+        })
+
+        # TODO: send pin_code via email here
+
+        return {
+            "userId":   str(created_id),
+            "pin_code": pin_code
+        }, 201
 
     def update_user(self, data):
         try:
             user_id = ObjectId(data.get("user_id").get("$oid"))
-
             data.pop("user_id", None)
 
             user = users.find_one_and_update(
@@ -71,6 +88,7 @@ class UserController:
                 upsert=True,
                 return_document=True,
             )
-            return {"_id": str(json.loads(json_util.dumps(user))["_id"]["$oid"])}, 200
+            return {"_id": str(user["_id"])}, 200
+
         except Exception as e:
             return {"message": str(e)}, 400
