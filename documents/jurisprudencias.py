@@ -114,12 +114,12 @@ def remove_accented_vowels(text: str) -> str:
 modified_jurisprudencias = []
 # len(jurisprudencias_complete)
 for i in range(0, len(jurisprudencias_complete)):
-    print(i)
+
     jurisprudencia = jurisprudencias_complete[i]
     ius = jurisprudencia.get("ius")
-    get_url = f"https://sjf2.scjn.gob.mx/services/sjftesismicroservice/api/public/tesis/{ius}?isSemanal=true&hostName=https://sjf2.scjn.gob.mx" # noqa
+    get_url = f"https://sjf2.scjn.gob.mx/services/sjftesismicroservice/api/public/tesis/{ius}?isSemanal=true&hostName=https://sjf2.scjn.gob.mx"  # noqa
 
-    response = requests.get(get_url)
+    response = requests.get(get_url, timeout=10)
     data = response.json()
     jurisprudencia["rubro"] = remove_accented_vowels(jurisprudencia.get("rubro"))
     jurisprudencia["textoPublicacion"] = remove_accented_vowels(

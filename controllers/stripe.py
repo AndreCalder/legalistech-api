@@ -165,9 +165,6 @@ class StripeController:
             if event["type"] == "invoice.paid":
                 invoice = event["data"]["object"]
 
-                if invoice.get("billing_reason") == "subscription_cycle":
-                    print("Subscription cycle")
-
             return jsonify({"status": "success"}), 200
         except stripe.error.SignatureVerificationError:
             return jsonify({"error": "Invalid signature"}), 400
