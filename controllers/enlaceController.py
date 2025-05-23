@@ -1,63 +1,71 @@
-import os
-import json
-from bson import ObjectId, json_util
-from flask import g, jsonify
+from flask import jsonify, g
+from controllers.util.enlace_base import EnlaceBase
 from mongoConnection import db
-import requests
+from bson import ObjectId
+import json
 
-files = db["files"]
-enlace_url = "https://api.fiducia.com.mx/enlace/v1/"
+binders = db["binders"]
 
-enlace_key = os.getenv("ENLACE_KEY")
+class EnlaceController(EnlaceBase):
 
+    # === Expedient Methods ===
 
-class EnlaceController:
+    # Search an expedient by number, court, etc.
+    def search_expedient(self, payload):
+        return jsonify(self.make_request("expedientes", method="POST", data=json.dumps(payload)))
 
-    # Funcion para hacer peticiones a la API de Enlace Jurídico
-    def make_request(self, endpoint, method="GET", request_params=None, data=None):
-        url = enlace_url + endpoint
+    # Retrieve full history of a given expedient
+    def get_expedient_history(self, payload):
+        return jsonify(self.make_request("expedientes/historial", method="POST", data=json.dumps(payload)))
 
-        params = {
-            "apikey": enlace_key,
-        }
+    # Suggest related expedients based on filters (AI assistant)
+    def match_expedients(self, payload):
+        return jsonify(self.make_request("asistente", method="POST", data=json.dumps(payload)))
 
-        if request_params:
-            params = {**params, **request_params}
-
-        if method == "GET":
-            headers = {"Content-Type": "application/json"}
-            response = requests.get(url, headers=headers, params=params, timeout=15)
-        elif method == "POST":
-            headers = {
-                "Content-Type": "application/json",
-                "X-Http-Method-Override": "GET",
-            }
-            response = requests.request(
-                "POST", url, headers=headers, params=params, data=data, timeout=15
-            )
-        return response.json()
-
-    # Obtiene la lista de carpetas del usuario
-    def get_files(self):
-        user_files = files.find({"user_id": ObjectId(g.userId)})
-
-        return jsonify(json.loads(json_util.dumps(user_files)))
-
-    # Obtiene los estados de la API de Enlace Jurídico
-    # devuelve la lista de estados en formato JSON
+    # Get list of states from Enlace
     def get_states(self):
-        states = self.make_request("estados")
-        return jsonify(states)
+        return jsonify(self.make_request("estados"))
 
-    # Obtiene los juzgados de la API de Enlace Jurídico
-    # Recibe el estado como parámetro
-    # devuelve la lista de juzgados en formato JSON
+    # Get list of courts for a given state
     def get_courts(self, state):
+        payload = {"estado": state, "entidad": "estatal"}
+        return jsonify(self.make_request("juzgados", method="POST", data=json.dumps(payload)))
 
-        courts = self.make_request(
-            "juzgados",
-            method="POST",
-            data=json.dumps({"estado": state, "entidad": "estatal"}),
+    # === Binder Methods (via Enlace API) ===
+
+    # Create a binder using Enlace API and store locally
+    def create_binder(self, payload):
+        response = self.make_request("carpetas", method="POST", data=json.dumps(payload))
+
+        estado = payload.get("estado")
+        carpetas = response.get("carpetas", {}).get("estatal", [])
+
+        for carpeta in carpetas:
+            binders.insert_one({
+                "user_id": ObjectId(g.userId),
+                "carpeta_id": carpeta["carpeta_id"],
+                "carpeta": carpeta["carpeta"],
+                "estado": estado,
+                "creada": carpeta["creada"]
+            })
+
+        return jsonify({"message": "Binder created via API and stored locally", "api_response": response})
+
+    # Rename binder using Enlace API and update local copy
+    def rename_binder(self, binder_id, payload):
+        response = self.make_request("carpetas/renombrar", method="POST", data=json.dumps(payload))
+
+        binders.update_one(
+            {"carpeta_id": binder_id, "user_id": ObjectId(g.userId)},
+            {"$set": {"carpeta": payload.get("carpeta")}}
         )
 
-        return jsonify(courts)
+        return jsonify({"message": "Binder renamed via API and updated locally", "api_response": response})
+
+    # Delete binder via Enlace API and remove local reference
+    def delete_binder(self, binder_id, payload):
+        response = self.make_request("carpetas/eliminar", method="POST", data=json.dumps(payload))
+
+        binders.delete_one({"carpeta_id": binder_id, "user_id": ObjectId(g.userId)})
+
+        return jsonify({"message": "Binder deleted via API and removed locally", "api_response": response})

@@ -25,7 +25,7 @@ class TokenController:
         ):
             data = {
                 "user_id": token_data.get("user_id"),
-                "username": token_data.get("username"),
+                "email": token_data.get("email"),
             }
             access_token = self.create_access_token(data)
             refresh_token = self.create_refresh_token(data)
@@ -35,7 +35,7 @@ class TokenController:
                 "message": "Success",
                 "access_token": access_token,
                 "refresh_token": refresh_token,
-                "username": token_data.get("username"),
+                "email": token_data.get("email"),
                 "user_id": token_data.get("user_id"),
                 "roles": token_data.get("roles"),
             }

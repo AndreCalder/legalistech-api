@@ -7,6 +7,7 @@ from routes.paymentsBlueprint import payment_Router
 from routes.subBlueprint import sub_Router
 from routes.pinsBlueprint import pins_bp
 from routes.enlaceBlueprint import enlace_Router
+from routes.bindersBlueprint import binders_Router
 
 router = Blueprint("router", __name__)
 
@@ -20,3 +21,4 @@ router.register_blueprint(pins_bp, url_prefix="/pins")  # PIN Management Routes
 router.register_blueprint(
     enlace_Router, url_prefix="/enlace"
 )  # Enlace Jurídico integration routes
+router.register_blueprint(binders_Router, url_prefix="/binders")
