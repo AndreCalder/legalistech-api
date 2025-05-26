@@ -21,6 +21,9 @@ class ConsultController:
             parameters={"input_type": "query"},
         )
 
+        # TO DO: Add error handling for embedding failure
+        # TO DO: Add Document filter based on request
+
         results = index.query(
             namespace="milegalista",
             vector=query_embedding[0].values,
@@ -40,3 +43,5 @@ class ConsultController:
                 )
 
         return result_arr, 200
+
+    # Create get by ID method, return only one result.

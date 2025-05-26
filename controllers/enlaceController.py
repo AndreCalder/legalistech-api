@@ -34,7 +34,6 @@ class EnlaceController(EnlaceBase):
 
     # Get list of states from Enlace
     def get_states(self):
-        print(self.make_request("estados"))
         return jsonify(self.make_request("estados"))
 
     # Get list of courts for a given state
@@ -48,7 +47,6 @@ class EnlaceController(EnlaceBase):
 
     # Create a binder using Enlace API and store locally
     def create_binder(self, payload):
-        print("Payload:", payload)
         response = self.make_request(
             "carpetas", method="POST", data=json.dumps(payload)
         )

@@ -25,9 +25,11 @@ with open(json_path) as f:
 
 
 def send_images_to_vision(images):
-    """Send an array of base64-encoded images to Google Cloud Vision."""
+    # Initialize the Vision API client with the service account info
     client = vision.ImageAnnotatorClient.from_service_account_info(account_info)
     all_texts = []
+
+    # For each image, convert it to base64 and send it to the Vision API
     for idx, img in enumerate(images):
         # Convert the PIL image to base64
         img_base64 = image_to_base64(img)
@@ -40,9 +42,13 @@ def send_images_to_vision(images):
         texts = response.text_annotations
 
         doc_text = " ".join([text.description for text in texts])
+
+        # Append the detected text to the list
         all_texts.append(doc_text)
 
+    # Join the texts from all images into a single string and return
     document_text = " ".join(all_texts)
+
     return document_text
 
 
@@ -53,5 +59,7 @@ os.makedirs(output_folder, exist_ok=True)
 
 
 def scan_pdf_to_text(pdf_file):
+    # Convert PDF File to images
     images = pdf_to_images(pdf_file)
+
     return send_images_to_vision(images)

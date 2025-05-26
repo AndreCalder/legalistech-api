@@ -33,14 +33,17 @@ index = pc.Index("milegalista")
 
 class AssistantController:
 
+    # Gets the extension of the uploaded file
     def get_file_ext(self, uploaded_file_filename: str) -> str:
         return uploaded_file_filename.split(".")[-1]
 
+    # Flattens the history list into a string format
     def flatten_history(self, history_list):
         return "\n".join(
             f"{msg.role.upper()}: {msg.parts[0].text}" for msg in history_list
         )
 
+    # Creates chat session
     def createSession(self, request):
         body = request.json
         body["user_id"] = ObjectId(g.userId)
@@ -53,6 +56,7 @@ class AssistantController:
 
         return str(savedSession)
 
+    # Updates an existing session
     def updateSession(self, data):
         session = sessions.find_one_and_update(
             {"_id": ObjectId(data.get("session_id"))},
@@ -63,16 +67,19 @@ class AssistantController:
         session_id = str(json.loads(json_util.dumps(session))["_id"]["$oid"])
         return {"_id": session_id}, 200
 
+    # Gets all the sessions for the user
     def getUserSessions(self):
         user_id = g.userId
         userSessions = sessions.find({"user_id": ObjectId(user_id)})
         return json.loads(json_util.dumps(userSessions)), 200
 
+    # Gets a specific session by ID
     def getSession(self, id):
         user_id = g.userId
         session = sessions.find_one({"_id": ObjectId(id), "user_id": ObjectId(user_id)})
         return json.loads(json_util.dumps(session)), 200
 
+    # IN PROGRESS, maybe add a tool to handle this, could use consultcontroller
     def pinecone_consult_logic(query: str):
         query_embedding = pc.inference.embed(
             model="multilingual-e5-large",
@@ -100,21 +107,23 @@ class AssistantController:
 
         return "\n---\n".join(result_arr[:5])
 
+    # Full chat session handler
     def chatSession(self, id, request):
-
+        # Gets message from form data
         msg = request.form.get("msg")
-        print(msg)
         uploaded_file = None
 
         if request.files:
             uploaded_file = request.files["file"]
 
+        # Create the message object
         message_obj = {
             "role": "user",
             "user_question": msg,
             "timestamp": datetime.now(),
         }
 
+        # If a file is uploaded, add its details to the message object
         if uploaded_file:
             message_obj["file_url"] = request.form.get("file_url")
             message_obj["file_name"] = request.form.get("file_name")
@@ -126,6 +135,7 @@ class AssistantController:
 
         file_data = ""
 
+        # Fills the message history with user and model messages
         for message in history:
             if message.get("role") == "user":
                 msgHistory.append(
@@ -152,32 +162,45 @@ class AssistantController:
             temperature=ASSISTANT_CONFIG["LLM"]["TEMPERATURE"]
         )
 
+        # TO DO: Add Pinecone integration consult logic to tools
+        # toolkit_funcs.py in util folder
+        # Add the tool to the model
         model = GenerativeModel(
             ASSISTANT_CONFIG["LLM"]["MODEL"],
             system_instruction=ASSISTANT_CONFIG["LLM"]["SYSTEM_INSTRUCTION"],
             generation_config=generation_config,
-            tools=[],
+            tools=[
+                # Add tools here
+            ],
         )
+
+        # Read file data if a file is uploaded
         if uploaded_file and uploaded_file.filename:
             ext = self.get_file_ext(uploaded_file.filename).lower()
             if ext == "pdf" or ext == "docx":
                 with NamedTemporaryFile() as temp_file:
                     uploaded_file.save(temp_file)
                     temp_file.seek(0)
+                    # Scan the PDF or DOCX file to extract text
                     file_data = scan_pdf_to_text(temp_file)
                     message_obj["file_data"] = file_data
             else:
                 return {"error": f"Unsupported file format: {ext}"}, 400
 
+        # Create the prompt for the model, including the message, history, and file data
         prompt = ASSISTANT_CONFIG["LLM"]["PROMPT"].format(
             MESSAGE=msg, HISTORY=self.flatten_history(msgHistory), FILE_DATA=file_data
         )
 
+        # Estimate token usage and check balance
         token_count_result = model.count_tokens(prompt)
         estimated_token_cost = token_count_result.total_tokens
         current_balance, _, _ = tkbController.get_token_balance_raw(g.userId)
+
+        # Token equivalence factor, adjust as necessary
         token_equivalence = 500
 
+        # Check if the user has enough tokens to perform the action
         if (estimated_token_cost / token_equivalence) > current_balance:
             botmsg = (
                 "No cuentas con suficientes tokens para realizar esta acción. "
@@ -199,6 +222,8 @@ class AssistantController:
             )
 
             return json.loads(json_util.dumps(session)), 200
+
+        # Generate content using the model
         response = model.generate_content(prompt)
 
         usage_metadata = response.usage_metadata
@@ -210,12 +235,17 @@ class AssistantController:
         input_tokens = (
             session.get("input_tokens", 0) + usage_metadata.prompt_token_count
         )
+
+        # Calculate total token count
         total_token_count = output_tokens + input_tokens
 
+        # Response candidates is a list of possible tools to use
         if len(response.candidates) > 0:
             if len(response.candidates[0].function_calls) == 0:
                 botmsg = response.candidates[0].text
-                # TODO: Implement function call handling
+                
+            # TODO: Implement function call handling
+                
         else:
             botmsg = response.text
 
@@ -225,6 +255,7 @@ class AssistantController:
             "timestamp": datetime.now(),
         }
 
+        # Calculate token usage and update the user's token balance
         token_usage = total_token_count / token_equivalence
         tkbController.use_tokens(g.userId, token_usage)
 

@@ -5,6 +5,14 @@ consultController = ConsultController()
 consult_Router = Blueprint("consultRouter", __name__)
 
 
+"""
+{
+    "query": "search term",
+    "document": "Specific document to search in"
+}
+"""
+
+
 @consult_Router.route("/", methods=["POST"])
 def search():
     req = request.json
