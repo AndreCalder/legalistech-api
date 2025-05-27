@@ -9,7 +9,9 @@ users = db["users"]
 class Token_Balance_Controller:
 
     def get_token_balance_raw(self, user_id):
+        print(f"[DEBUG] Checking user ID: {user_id}")
         user = users.find_one({"_id": ObjectId(user_id)})
+        print(f"[DEBUG] Retrieved user: {user}")
         monthly_tokens = user.get("monthly_tokens", 0)
         active_packs = [
             p

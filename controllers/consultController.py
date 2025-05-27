@@ -10,7 +10,7 @@ def get_numeric_id(item):
 
 class ConsultController:
 
-    def search(self, query):
+    def search(self, query, document=None):
 
         pc = Pinecone(api_key=os.getenv("PINECONE_API_KEY"))
         index = pc.Index("milegalista")
@@ -20,9 +20,11 @@ class ConsultController:
             inputs=[f"query: {query}"],
             parameters={"input_type": "query"},
         )
-
-        # TO DO: Add error handling for embedding failure
-        # TO DO: Add Document filter based on request
+        
+        # Optional document filtering
+        filter_query = {}
+        if document:
+            filter_query = {"metadata.documento":{"$eq": document}}
 
         results = index.query(
             namespace="milegalista",
@@ -30,6 +32,7 @@ class ConsultController:
             top_k=15,
             include_values=False,
             include_metadata=True,
+            filter=filter_query,
         )
 
         result_arr = []
@@ -44,4 +47,23 @@ class ConsultController:
 
         return result_arr, 200
 
+    
     # Create get by ID method, return only one result.
+    
+    def get_by_id(self, document_id):
+        pc = Pinecone(api_key=os.getenv("PINECONE_API_KEY"))
+        index = pc.Index("milegalista")
+
+        try:
+            results = index.fetch(ids=[document_id], namespace="milegalista")
+            match = results.vectors.get(document_id)
+            if match:
+                return {
+                    "id": match.get("id"),
+                    "metadata": match.get("metadata"),
+                }, 200
+            else:
+                return {"error": "Document not found"}, 404
+            
+        except Exception as e:
+            return {"error": str(e)}, 500

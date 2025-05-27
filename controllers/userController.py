@@ -5,6 +5,7 @@ import os
 import datetime
 from bson import ObjectId, json_util
 from controllers.pinsController import generate_pin_for_user
+from controllers.util.email_utils import send_pin_email
 from mongoConnection import db
 import bcrypt
 import stripe
@@ -56,8 +57,10 @@ class UserController:
 
         generate_pin_for_user(str(created_id))
 
-        # TODO: send pin_code via email here
-
+        # Send pin_code via email here
+        pin_code = generate_pin_for_user(str(created_id))
+        send_pin_email(email, pin_code, str(created_id))
+        
         return {"userId": str(created_id)}, 200
 
     def update_user(self, data):

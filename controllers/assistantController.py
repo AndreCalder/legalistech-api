@@ -2,9 +2,11 @@ import json
 import os
 from bson import ObjectId, json_util
 from controllers.util.gcp_cloudvision import scan_pdf_to_text
+from controllers.util.toolkit_funcs import process_pdf_tool
 from mongoConnection import db
 from flask import g
 import vertexai
+from google.oauth2 import service_account #Provisionally
 from vertexai.generative_models import (
     GenerativeModel,
     GenerationConfig,
@@ -14,10 +16,16 @@ from vertexai.generative_models import (
 from controllers.util.assistant_config import ASSISTANT_CONFIG
 from controllers.eventController import EventController
 from controllers.token_balance_controller import Token_Balance_Controller
+from controllers.util.toolkit_funcs import pinecone_consult_tool
 from datetime import datetime
 from tempfile import NamedTemporaryFile
 from pinecone.grpc import PineconeGRPC as Pinecone
 from dotenv import load_dotenv
+
+# Provisionally
+credentials = service_account.Credentials.from_service_account_file(
+    "controllers/util/service_key.json"
+)
 
 load_dotenv()
 eventController = EventController()
@@ -80,7 +88,7 @@ class AssistantController:
         return json.loads(json_util.dumps(session)), 200
 
     # IN PROGRESS, maybe add a tool to handle this, could use consultcontroller
-    def pinecone_consult_logic(query: str):
+    def pinecone_consult_logic(self, query: str):
         query_embedding = pc.inference.embed(
             model="multilingual-e5-large",
             inputs=[f"query: {query}"],
@@ -106,7 +114,12 @@ class AssistantController:
                 )
 
         return "\n---\n".join(result_arr[:5])
-
+    
+    #Provisionally initialize Vertex AI with credentials
+    vertexai.init(
+        project="mlai-434520",
+        credentials=credentials
+    )
     # Full chat session handler
     def chatSession(self, id, request):
         # Gets message from form data
@@ -115,14 +128,17 @@ class AssistantController:
 
         if request.files:
             uploaded_file = request.files["file"]
-
+            print(f"[DEBUG] Uploaded file: {uploaded_file.filename}")
+        else:
+            print("[DEBUG] No file uploaded")
+        
         # Create the message object
         message_obj = {
             "role": "user",
             "user_question": msg,
             "timestamp": datetime.now(),
         }
-
+        
         # If a file is uploaded, add its details to the message object
         if uploaded_file:
             message_obj["file_url"] = request.form.get("file_url")
@@ -162,30 +178,36 @@ class AssistantController:
             temperature=ASSISTANT_CONFIG["LLM"]["TEMPERATURE"]
         )
 
-        # TO DO: Add Pinecone integration consult logic to tools
+        # Added Pinecone integration consult logic to tools
         # toolkit_funcs.py in util folder
-        # Add the tool to the model
+        # Adding the pdf tool gives search errors, so we use the pinecone_consult_tool only (REVIEW)
         model = GenerativeModel(
             ASSISTANT_CONFIG["LLM"]["MODEL"],
             system_instruction=ASSISTANT_CONFIG["LLM"]["SYSTEM_INSTRUCTION"],
             generation_config=generation_config,
-            tools=[
-                # Add tools here
-            ],
+            tools=[pinecone_consult_tool],
         )
 
         # Read file data if a file is uploaded
         if uploaded_file and uploaded_file.filename:
             ext = self.get_file_ext(uploaded_file.filename).lower()
             if ext == "pdf" or ext == "docx":
-                with NamedTemporaryFile() as temp_file:
+                with NamedTemporaryFile(delete=False, suffix=f".{ext}") as temp_file:
                     uploaded_file.save(temp_file)
-                    temp_file.seek(0)
-                    # Scan the PDF or DOCX file to extract text
-                    file_data = scan_pdf_to_text(temp_file)
+                    temp_path = temp_file.name  # Save the path before closing
+
+                try:
+                    # Scan the file using its path (NOT the open file object)
+                    file_data = scan_pdf_to_text(temp_path)
                     message_obj["file_data"] = file_data
+                finally:
+                    try:
+                        os.remove(temp_path)
+                    except Exception as e:
+                        print(f"[DEBUG] Error removing temporary file: {e}")
             else:
                 return {"error": f"Unsupported file format: {ext}"}, 400
+
 
         # Create the prompt for the model, including the message, history, and file data
         prompt = ASSISTANT_CONFIG["LLM"]["PROMPT"].format(
@@ -241,19 +263,73 @@ class AssistantController:
 
         # Response candidates is a list of possible tools to use
         if len(response.candidates) > 0:
-            if len(response.candidates[0].function_calls) == 0:
+            call = response.candidates[0].function_calls[0] if response.candidates[0].function_calls else None
+
+            if call and call.name == "pinecone_consult":
+                queries = call.args.get("queries", [])
+                tool_output = []
+
+                for q in queries:
+                    tool_output.append(self.pinecone_consult_logic(q))
+
+                botmsg = "\n\n".join(tool_output)
+
+                # Optionally track the tool call
+                botmsg_object["tool_used"] = "pinecone_consult"
+
+            else:
                 botmsg = response.candidates[0].text
-                
-            # TODO: Implement function call handling
-                
         else:
             botmsg = response.text
+
 
         botmsg_object = {
             "role": "model",
             "bot_response": botmsg,
             "timestamp": datetime.now(),
         }
+        
+        # Guardar en 'sentencias' si hubo file_data
+        if message_obj.get("file_data"):
+            from controllers.util.sentence_config import extract_fields_from_text
+            analysis = extract_fields_from_text(message_obj["file_data"])
+
+            # Valor por defecto si los campos están vacíos / Significa que no se extrajeron datos relevantes
+            def default_if_empty(value):
+                if isinstance(value, list) and not value:
+                    return ["No relevant data found for this field"]
+                if isinstance(value, dict) and all(not v for v in value.values()):
+                    return {k: "No relevant data found for this field" for k in value}
+                if isinstance(value, str) and not value:
+                    return "No relevant data found for this field"
+                return value
+
+            analysis["case_info"] = default_if_empty(analysis.get("case_info", {}))
+            analysis["case_outcome"] = default_if_empty(analysis.get("case_outcome", {}))
+            analysis["reasons"] = default_if_empty(analysis.get("reasons", []))
+            analysis["rights_and_laws_referenced"] = default_if_empty(analysis.get("rights_and_laws_referenced", []))
+
+            # Si todos los campos relevantes están vacíos o no extraídos
+            all_defaults = all(
+                v == "No relevant data found for this field" or 
+                (isinstance(v, list) and all(i == "No relevant data found for this field" for i in v)) or 
+                (isinstance(v, dict) and all(i == "No relevant data found for this field" for i in v.values()))
+                for v in analysis.values()
+            )
+
+            if all_defaults: # Nos da un indicativo de que no se extrajo información relevante
+                print("[DEBUG] ⚠️ Are you sure this is a legal document? No relevant data was found.")
+
+            sentence_doc = {
+                "user_id": ObjectId(g.userId),
+                "session_id": ObjectId(id),
+                "file_name": message_obj.get("file_name"),
+                "file_data": message_obj.get("file_data"),
+                **analysis,
+                "timestamp": datetime.now(),
+            }
+            sentencias.insert_one(sentence_doc)
+
 
         # Calculate token usage and update the user's token balance
         token_usage = total_token_count / token_equivalence

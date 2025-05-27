@@ -42,5 +42,5 @@ def verify_user_pin(user_id: str, pin_code: str) -> bool:
         return False
 
     pins.update_one({"_id": pin_doc["_id"]}, {"$set": {"PIN_used": True}})
-    users.update_one({"_id": ObjectId(user_id)}, {"$set": {"confirmed_acc": True}})
+    users.update_one({"_id": ObjectId(user_id)}, {"$set": {"verified": True}})
     return True
