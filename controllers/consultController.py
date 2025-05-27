@@ -1,6 +1,7 @@
 import os
 from pinecone.grpc import PineconeGRPC as Pinecone
 import re
+import unicodedata
 
 
 def get_numeric_id(item):
@@ -10,11 +11,27 @@ def get_numeric_id(item):
 
 class ConsultController:
 
-    def search(self, query, document=None):
+    def normalize_string(self, text: str) -> str:
+        # Remove accents (é → e, ñ → n, etc.)
+        text = (
+            unicodedata.normalize("NFKD", text)
+            .encode("ASCII", "ignore")
+            .decode("utf-8")
+        )
 
+        # Remove all non-alphanumeric characters (except spaces)
+        text = re.sub(r"[^a-zA-Z0-9\s]", "", text)
+
+        # Optional: remove extra spaces
+        text = re.sub(r"\s+", " ", text).strip()
+
+        return text
+
+    def search(self, query, id=None, document=None, k_count=5):
+
+        print("K_COUNT:", k_count)
         pc = Pinecone(api_key=os.getenv("PINECONE_API_KEY"))
         index = pc.Index("milegalista")
-
         query_embedding = pc.inference.embed(
             model="multilingual-e5-large",
             inputs=[f"query: {query}"],
@@ -24,32 +41,37 @@ class ConsultController:
         # Optional document filtering
         filter_query = {}
         if document:
-            filter_query = {"metadata.documento":{"$eq": document}}
+            filter_query["documento"] = {"$eq": self.normalize_string(document)}
 
         results = index.query(
             namespace="milegalista",
             vector=query_embedding[0].values,
-            top_k=15,
+            top_k=k_count,
             include_values=False,
             include_metadata=True,
             filter=filter_query,
         )
-
         result_arr = []
 
         results.matches.sort(key=lambda x: x.get("score", 0), reverse=True)
 
+        print(results)
+        print(id)
+        if id:
+            results.matches = [
+                match for match in results.matches if match.get("id") == id
+            ]
+
         for match in results.matches:
-            if match.get("score") > 0.79:
+            if match.get("score") > 0.7:
                 result_arr.append(
                     {"id": match.get("id"), "metadata": match.get("metadata")}
                 )
 
-        return result_arr, 200
+        return result_arr
 
-    
     # Create get by ID method, return only one result.
-    
+
     def get_by_id(self, document_id):
         pc = Pinecone(api_key=os.getenv("PINECONE_API_KEY"))
         index = pc.Index("milegalista")
@@ -64,6 +86,6 @@ class ConsultController:
                 }, 200
             else:
                 return {"error": "Document not found"}, 404
-            
+
         except Exception as e:
             return {"error": str(e)}, 500

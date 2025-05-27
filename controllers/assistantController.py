@@ -6,7 +6,7 @@ from controllers.util.toolkit_funcs import process_pdf_tool
 from mongoConnection import db
 from flask import g
 import vertexai
-from google.oauth2 import service_account #Provisionally
+from google.oauth2 import service_account  # Provisionally
 from vertexai.generative_models import (
     GenerativeModel,
     GenerationConfig,
@@ -21,6 +21,7 @@ from datetime import datetime
 from tempfile import NamedTemporaryFile
 from pinecone.grpc import PineconeGRPC as Pinecone
 from dotenv import load_dotenv
+from controllers.consultController import ConsultController
 
 # Provisionally
 credentials = service_account.Credentials.from_service_account_file(
@@ -28,6 +29,8 @@ credentials = service_account.Credentials.from_service_account_file(
 )
 
 load_dotenv()
+
+consultController = ConsultController()
 eventController = EventController()
 tkbController = Token_Balance_Controller()
 
@@ -114,12 +117,10 @@ class AssistantController:
                 )
 
         return "\n---\n".join(result_arr[:5])
-    
-    #Provisionally initialize Vertex AI with credentials
-    vertexai.init(
-        project="mlai-434520",
-        credentials=credentials
-    )
+
+    # Provisionally initialize Vertex AI with credentials
+    vertexai.init(project="mlai-434520", credentials=credentials)
+
     # Full chat session handler
     def chatSession(self, id, request):
         # Gets message from form data
@@ -128,17 +129,14 @@ class AssistantController:
 
         if request.files:
             uploaded_file = request.files["file"]
-            print(f"[DEBUG] Uploaded file: {uploaded_file.filename}")
-        else:
-            print("[DEBUG] No file uploaded")
-        
+
         # Create the message object
         message_obj = {
             "role": "user",
             "user_question": msg,
             "timestamp": datetime.now(),
         }
-        
+
         # If a file is uploaded, add its details to the message object
         if uploaded_file:
             message_obj["file_url"] = request.form.get("file_url")
@@ -204,10 +202,9 @@ class AssistantController:
                     try:
                         os.remove(temp_path)
                     except Exception as e:
-                        print(f"[DEBUG] Error removing temporary file: {e}")
+                        pass
             else:
                 return {"error": f"Unsupported file format: {ext}"}, 400
-
 
         # Create the prompt for the model, including the message, history, and file data
         prompt = ASSISTANT_CONFIG["LLM"]["PROMPT"].format(
@@ -263,35 +260,62 @@ class AssistantController:
 
         # Response candidates is a list of possible tools to use
         if len(response.candidates) > 0:
-            call = response.candidates[0].function_calls[0] if response.candidates[0].function_calls else None
-
+            call = (
+                response.candidates[0].function_calls[0]
+                if response.candidates[0].function_calls
+                else None
+            )
             if call and call.name == "pinecone_consult":
-                queries = call.args.get("queries", [])
-                tool_output = []
 
-                for q in queries:
-                    tool_output.append(self.pinecone_consult_logic(q))
+                print(call.args)
+                res = consultController.search(
+                    call.args.get("article"),
+                    call.args.get("article_id"),
+                    call.args.get("document"),
+                    call.args.get("k_count"),
+                )
+                print("===== PINECONE RESPONSE =====")
 
-                botmsg = "\n\n".join(tool_output)
+                tool_result_text = (
+                    f"Resultado de la herramienta pinecone_consult:\n{res}"
+                )
 
-                # Optionally track the tool call
-                botmsg_object["tool_used"] = "pinecone_consult"
+                # Append tool result
+                msgHistory.append(
+                    Content(
+                        role="tool",
+                        parts=[Part.from_text(tool_result_text)],
+                    )
+                )
+
+                print(msgHistory[-1])
+
+                # Generate follow-up
+                prompt = ASSISTANT_CONFIG["LLM"]["PROMPT"].format(
+                    MESSAGE="Tool result received, please provide a follow-up response.",
+                    HISTORY=self.flatten_history(msgHistory),
+                    FILE_DATA="",
+                )
+                response = model.generate_content(prompt)
+                print("===== FOLLOW-UP RESPONSE =====")
+                print(response)
+                botmsg = response.text
 
             else:
                 botmsg = response.candidates[0].text
         else:
             botmsg = response.text
 
-
         botmsg_object = {
             "role": "model",
             "bot_response": botmsg,
             "timestamp": datetime.now(),
         }
-        
+
         # Guardar en 'sentencias' si hubo file_data
         if message_obj.get("file_data"):
             from controllers.util.sentence_config import extract_fields_from_text
+
             analysis = extract_fields_from_text(message_obj["file_data"])
 
             # Valor por defecto si los campos están vacíos / Significa que no se extrajeron datos relevantes
@@ -305,20 +329,29 @@ class AssistantController:
                 return value
 
             analysis["case_info"] = default_if_empty(analysis.get("case_info", {}))
-            analysis["case_outcome"] = default_if_empty(analysis.get("case_outcome", {}))
+            analysis["case_outcome"] = default_if_empty(
+                analysis.get("case_outcome", {})
+            )
             analysis["reasons"] = default_if_empty(analysis.get("reasons", []))
-            analysis["rights_and_laws_referenced"] = default_if_empty(analysis.get("rights_and_laws_referenced", []))
+            analysis["rights_and_laws_referenced"] = default_if_empty(
+                analysis.get("rights_and_laws_referenced", [])
+            )
 
             # Si todos los campos relevantes están vacíos o no extraídos
             all_defaults = all(
-                v == "No relevant data found for this field" or 
-                (isinstance(v, list) and all(i == "No relevant data found for this field" for i in v)) or 
-                (isinstance(v, dict) and all(i == "No relevant data found for this field" for i in v.values()))
+                v == "No relevant data found for this field"
+                or (
+                    isinstance(v, list)
+                    and all(i == "No relevant data found for this field" for i in v)
+                )
+                or (
+                    isinstance(v, dict)
+                    and all(
+                        i == "No relevant data found for this field" for i in v.values()
+                    )
+                )
                 for v in analysis.values()
             )
-
-            if all_defaults: # Nos da un indicativo de que no se extrajo información relevante
-                print("[DEBUG] ⚠️ Are you sure this is a legal document? No relevant data was found.")
 
             sentence_doc = {
                 "user_id": ObjectId(g.userId),
@@ -329,7 +362,6 @@ class AssistantController:
                 "timestamp": datetime.now(),
             }
             sentencias.insert_one(sentence_doc)
-
 
         # Calculate token usage and update the user's token balance
         token_usage = total_token_count / token_equivalence
