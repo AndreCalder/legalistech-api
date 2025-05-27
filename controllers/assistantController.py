@@ -266,15 +266,12 @@ class AssistantController:
                 else None
             )
             if call and call.name == "pinecone_consult":
-
-                print(call.args)
                 res = consultController.search(
                     call.args.get("article"),
                     call.args.get("article_id"),
                     call.args.get("document"),
                     call.args.get("k_count"),
                 )
-                print("===== PINECONE RESPONSE =====")
 
                 tool_result_text = (
                     f"Resultado de la herramienta pinecone_consult:\n{res}"
@@ -288,8 +285,6 @@ class AssistantController:
                     )
                 )
 
-                print(msgHistory[-1])
-
                 # Generate follow-up
                 prompt = ASSISTANT_CONFIG["LLM"]["PROMPT"].format(
                     MESSAGE="Tool result received, please provide a follow-up response.",
@@ -297,8 +292,6 @@ class AssistantController:
                     FILE_DATA="",
                 )
                 response = model.generate_content(prompt)
-                print("===== FOLLOW-UP RESPONSE =====")
-                print(response)
                 botmsg = response.text
 
             else:
