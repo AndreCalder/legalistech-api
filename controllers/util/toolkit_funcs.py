@@ -60,3 +60,36 @@ pinecone_consult = FunctionDeclaration(
 )
 
 pinecone_consult_tool = Tool(function_declarations=[pinecone_consult])
+
+mongo_sentencias_consult = FunctionDeclaration(
+    name="mongo_sentencias_consult",
+    description="Consulta documentos en la colección 'sentencias' de MongoDB.",
+    parameters={
+        "type": "object",
+        "properties": {
+            "sentencia_id": {
+                "type": "string",
+                "description": "ID de la sentencia (ObjectId como string)."
+            },
+            "document": {
+                "type": "string",
+                "description": "Nombre o fragmento del archivo (campo file_name)."
+            },
+            "article_id": {
+                "type": "string",
+                "description": "Artículo específico o ID a buscar dentro del texto del documento."
+            },
+            "article": {
+                "type": "string",
+                "description": "Artículo en lenguaje natural, como 'artículo 123'."
+            },
+            "k_count": {
+                "type": "integer",
+                "description": "Número máximo de resultados (default 5)."
+            }
+        },
+        "required": ["k_count"]
+    }
+)
+
+mongo_sentencias_tool = Tool(function_declarations=[mongo_sentencias_consult])

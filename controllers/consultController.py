@@ -2,14 +2,42 @@ import os
 from pinecone.grpc import PineconeGRPC as Pinecone
 import re
 import unicodedata
+from mongoConnection import db
+from bson import ObjectId
 
 
 def get_numeric_id(item):
     match = re.search(r"\d+", item["id"])
     return int(match.group()) if match else 0
 
-
 class ConsultController:
+
+    def __init__(self):
+        self.sentencias = db["sentencias"]
+
+    def search_mongo_sentencias(self, sentencia_id=None, document=None, article_id=None, article=None, k_count=5):
+        query = {}
+        if sentencia_id:
+            query["_id"] = ObjectId(sentencia_id)
+        if document:
+            query["file_name"] = {"$regex": document, "$options": "i"}
+        # ...otros filtros si se requieren...
+
+        result = self.sentencias.find_one(query)
+        if result:
+            # Extrae los campos importantes
+            return {
+                "file_name": result.get("file_name", "Sin nombre"),
+                "case_info": result.get("case_info", {}),
+                "case_outcome": result.get("case_outcome", {}),
+                "reasons": result.get("reasons", []),
+                "rights_and_laws_referenced": result.get("rights_and_laws_referenced", [])
+            }
+        return {"message": "No se encontró la sentencia."}
+
+
+
+
 
     def normalize_string(self, text: str) -> str:
         # Remove accents (é → e, ñ → n, etc.)

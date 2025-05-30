@@ -2,33 +2,33 @@ import json
 import os
 from bson import ObjectId, json_util
 from controllers.util.gcp_cloudvision import scan_pdf_to_text
-from controllers.util.toolkit_funcs import process_pdf_tool
+from controllers.util.toolkit_funcs import process_pdf_tool, pinecone_consult_tool, mongo_sentencias_tool
 from mongoConnection import db
 from flask import g
 import vertexai
-from google.oauth2 import service_account  # Provisionally
+from google.oauth2 import service_account
 from vertexai.generative_models import (
     GenerativeModel,
     GenerationConfig,
     Content,
     Part,
 )
-from controllers.util.assistant_config import ASSISTANT_CONFIG
+from controllers.util.assistant_config import ASSISTANT_CONFIG, MONGO_ASSISTANT_CONFIG
 from controllers.eventController import EventController
 from controllers.token_balance_controller import Token_Balance_Controller
-from controllers.util.toolkit_funcs import pinecone_consult_tool
 from datetime import datetime
 from tempfile import NamedTemporaryFile
 from pinecone.grpc import PineconeGRPC as Pinecone
 from dotenv import load_dotenv
 from controllers.consultController import ConsultController
 
-# Provisionally
 credentials = service_account.Credentials.from_service_account_file(
     "controllers/util/service_key.json"
 )
 
 load_dotenv()
+
+vertexai.init(project="mlai-434520", credentials=credentials)
 
 consultController = ConsultController()
 eventController = EventController()
@@ -44,17 +44,14 @@ index = pc.Index("milegalista")
 
 class AssistantController:
 
-    # Gets the extension of the uploaded file
     def get_file_ext(self, uploaded_file_filename: str) -> str:
         return uploaded_file_filename.split(".")[-1]
 
-    # Flattens the history list into a string format
     def flatten_history(self, history_list):
         return "\n".join(
             f"{msg.role.upper()}: {msg.parts[0].text}" for msg in history_list
         )
 
-    # Creates chat session
     def createSession(self, request):
         body = request.json
         body["user_id"] = ObjectId(g.userId)
@@ -67,7 +64,6 @@ class AssistantController:
 
         return str(savedSession)
 
-    # Updates an existing session
     def updateSession(self, data):
         session = sessions.find_one_and_update(
             {"_id": ObjectId(data.get("session_id"))},
@@ -78,19 +74,16 @@ class AssistantController:
         session_id = str(json.loads(json_util.dumps(session))["_id"]["$oid"])
         return {"_id": session_id}, 200
 
-    # Gets all the sessions for the user
     def getUserSessions(self):
         user_id = g.userId
         userSessions = sessions.find({"user_id": ObjectId(user_id)})
         return json.loads(json_util.dumps(userSessions)), 200
 
-    # Gets a specific session by ID
     def getSession(self, id):
         user_id = g.userId
         session = sessions.find_one({"_id": ObjectId(id), "user_id": ObjectId(user_id)})
         return json.loads(json_util.dumps(session)), 200
 
-    # IN PROGRESS, maybe add a tool to handle this, could use consultcontroller
     def pinecone_consult_logic(self, query: str):
         query_embedding = pc.inference.embed(
             model="multilingual-e5-large",
@@ -110,121 +103,92 @@ class AssistantController:
         for match in results.matches:
             if match.get("score") > 0.79:
                 result_arr.append(
-                    (
-                        f"[{match.metadata.get('documento')}] "
-                        f"{match.metadata.get('texto')}"
-                    )
+                    f"[{match.metadata.get('documento')}] {match.metadata.get('texto')}"
                 )
 
         return "\n---\n".join(result_arr[:5])
 
-    # Provisionally initialize Vertex AI with credentials
-    vertexai.init(project="mlai-434520", credentials=credentials)
-
-    # Full chat session handler
     def chatSession(self, id, request):
-        # Gets message from form data
         msg = request.form.get("msg")
-        uploaded_file = None
+        uploaded_file = request.files.get("file") if request.files else None
 
-        if request.files:
-            uploaded_file = request.files["file"]
-
-        # Create the message object
         message_obj = {
             "role": "user",
             "user_question": msg,
             "timestamp": datetime.now(),
         }
 
-        # If a file is uploaded, add its details to the message object
         if uploaded_file:
-            message_obj["file_url"] = request.form.get("file_url")
-            message_obj["file_name"] = request.form.get("file_name")
-            message_obj["file_type"] = request.form.get("file_type")
+            message_obj.update({
+                "file_url": request.form.get("file_url"),
+                "file_name": request.form.get("file_name"),
+                "file_type": request.form.get("file_type"),
+            })
 
         session = sessions.find_one({"_id": ObjectId(id)})
-        history = session.get("history")
+        history = session.get("history", [])
         msgHistory = []
-
         file_data = ""
 
-        # Fills the message history with user and model messages
         for message in history:
             if message.get("role") == "user":
-                msgHistory.append(
-                    Content(
-                        role="user",
-                        parts=[Part.from_text(message["user_question"])],
-                    )
-                )
-                if message.get("file_data"):
-                    file_data = message.get("file_data")
+                msgHistory.append(Content(role="user", parts=[Part.from_text(message["user_question"])]))
+                file_data = message.get("file_data", file_data)
             elif message.get("role") == "model":
-                msgHistory.append(
-                    Content(
-                        role="model",
-                        parts=[Part.from_text(message["bot_response"])],
-                    )
-                )
+                msgHistory.append(Content(role="model", parts=[Part.from_text(message["bot_response"])]))
 
-        vertexai.init(
-            project="mlai-434520",
-        )
+        generation_config = GenerationConfig(temperature=ASSISTANT_CONFIG["LLM"]["TEMPERATURE"])
 
-        generation_config = GenerationConfig(
-            temperature=ASSISTANT_CONFIG["LLM"]["TEMPERATURE"]
-        )
+        if any(keyword in msg.lower() for keyword in ["mongo", "mongodb"]):
+            model_cfg = MONGO_ASSISTANT_CONFIG
+            model = GenerativeModel(
+                model_cfg["LLM"]["MODEL"],
+                system_instruction=model_cfg["LLM"]["SYSTEM_INSTRUCTION"],
+                generation_config=generation_config,
+                tools=[mongo_sentencias_tool],
+            )
+            prompt_template = model_cfg["LLM"]["PROMPT"]
+            current_tool_type = "mongo"
+        else:
+            model_cfg = ASSISTANT_CONFIG
+            model = GenerativeModel(
+                model_cfg["LLM"]["MODEL"],
+                system_instruction=model_cfg["LLM"]["SYSTEM_INSTRUCTION"],
+                generation_config=generation_config,
+                tools=[pinecone_consult_tool],
+            )
+            prompt_template = model_cfg["LLM"]["PROMPT"]
+            current_tool_type = "pinecone"
 
-        # Added Pinecone integration consult logic to tools
-        # toolkit_funcs.py in util folder
-        # Adding the pdf tool gives search errors, so we use the pinecone_consult_tool only (REVIEW)
-        model = GenerativeModel(
-            ASSISTANT_CONFIG["LLM"]["MODEL"],
-            system_instruction=ASSISTANT_CONFIG["LLM"]["SYSTEM_INSTRUCTION"],
-            generation_config=generation_config,
-            tools=[pinecone_consult_tool],
-        )
-
-        # Read file data if a file is uploaded
         if uploaded_file and uploaded_file.filename:
             ext = self.get_file_ext(uploaded_file.filename).lower()
-            if ext == "pdf" or ext == "docx":
+            if ext in ["pdf", "docx"]:
                 with NamedTemporaryFile(delete=False, suffix=f".{ext}") as temp_file:
                     uploaded_file.save(temp_file)
-                    temp_path = temp_file.name  # Save the path before closing
+                    temp_path = temp_file.name
 
                 try:
-                    # Scan the file using its path (NOT the open file object)
                     file_data = scan_pdf_to_text(temp_path)
                     message_obj["file_data"] = file_data
                 finally:
-                    try:
-                        os.remove(temp_path)
-                    except Exception as e:
-                        pass
+                    os.remove(temp_path)
             else:
                 return {"error": f"Unsupported file format: {ext}"}, 400
 
-        # Create the prompt for the model, including the message, history, and file data
-        prompt = ASSISTANT_CONFIG["LLM"]["PROMPT"].format(
+        prompt = prompt_template.format(
             MESSAGE=msg, HISTORY=self.flatten_history(msgHistory), FILE_DATA=file_data
         )
 
-        # Estimate token usage and check balance
         token_count_result = model.count_tokens(prompt)
         estimated_token_cost = token_count_result.total_tokens
         current_balance, _, _ = tkbController.get_token_balance_raw(g.userId)
 
-        # Token equivalence factor, adjust as necessary
         token_equivalence = 500
 
-        # Check if the user has enough tokens to perform the action
         if (estimated_token_cost / token_equivalence) > current_balance:
             botmsg = (
                 "No cuentas con suficientes tokens para realizar esta acción. "
-                "Por favor adquiere más tokens o espera a que se "
-                "renueven tus tokens mensuales."
+                "Por favor adquiere más tokens o espera a que se renueven tus tokens mensuales."
             )
 
             botmsg_object = {
@@ -239,65 +203,51 @@ class AssistantController:
                 upsert=True,
                 return_document=True,
             )
-
             return json.loads(json_util.dumps(session)), 200
 
-        # Generate content using the model
         response = model.generate_content(prompt)
-
         usage_metadata = response.usage_metadata
 
-        output_tokens = (
-            session.get("output_tokens", 0) + usage_metadata.candidates_token_count
-        )
-
-        input_tokens = (
-            session.get("input_tokens", 0) + usage_metadata.prompt_token_count
-        )
-
-        # Calculate total token count
+        output_tokens = session.get("output_tokens", 0) + usage_metadata.candidates_token_count
+        input_tokens = session.get("input_tokens", 0) + usage_metadata.prompt_token_count
         total_token_count = output_tokens + input_tokens
 
-        # Response candidates is a list of possible tools to use
-        if len(response.candidates) > 0:
-            call = (
-                response.candidates[0].function_calls[0]
-                if response.candidates[0].function_calls
-                else None
-            )
-            if call and call.name == "pinecone_consult":
+        call = response.candidates[0].function_calls[0] if response.candidates and response.candidates[0].function_calls else None
+
+        if call:
+            if current_tool_type == "pinecone" and call.name == "pinecone_consult":
                 res = consultController.search(
                     call.args.get("article"),
                     call.args.get("article_id"),
                     call.args.get("document"),
                     call.args.get("k_count"),
                 )
+                tool_result_text = f"Resultado de la herramienta pinecone_consult:\n{res}"
 
-                tool_result_text = (
-                    f"Resultado de la herramienta pinecone_consult:\n{res}"
+            elif current_tool_type == "mongo" and call.name == "mongo_sentencias_consult":
+                res = consultController.search_mongo_sentencias(
+                    sentencia_id=call.args.get("sentencia_id"),
+                    document=call.args.get("document"),
+                    article_id=call.args.get("article_id"),
+                    article=call.args.get("article"),
+                    k_count=call.args.get("k_count", 5),
                 )
-
-                # Append tool result
-                msgHistory.append(
-                    Content(
-                        role="tool",
-                        parts=[Part.from_text(tool_result_text)],
-                    )
-                )
-
-                # Generate follow-up
-                prompt = ASSISTANT_CONFIG["LLM"]["PROMPT"].format(
-                    MESSAGE="Tool result received, please provide a follow-up response.",
-                    HISTORY=self.flatten_history(msgHistory),
-                    FILE_DATA="",
-                )
-                response = model.generate_content(prompt)
-                botmsg = response.text
+                tool_result_text = f"Resultado de la herramienta mongo_sentencias_consult:\n{res}"
 
             else:
-                botmsg = response.candidates[0].text
+                tool_result_text = "La herramienta invocada no está implementada."
+
+            msgHistory.append(Content(role="tool", parts=[Part.from_text(tool_result_text)]))
+
+            prompt = prompt_template.format(
+                MESSAGE="Tool result received, please provide a follow-up response.",
+                HISTORY=self.flatten_history(msgHistory),
+                FILE_DATA="",
+            )
+            response = model.generate_content(prompt)
+            botmsg = response.text if hasattr(response, "text") and response.text else "Respuesta generada por herramienta."
         else:
-            botmsg = response.text
+            botmsg = response.text if hasattr(response, "text") and response.text else "Respuesta generada."
 
         botmsg_object = {
             "role": "model",
@@ -305,13 +255,10 @@ class AssistantController:
             "timestamp": datetime.now(),
         }
 
-        # Guardar en 'sentencias' si hubo file_data
         if message_obj.get("file_data"):
             from controllers.util.sentence_config import extract_fields_from_text
-
             analysis = extract_fields_from_text(message_obj["file_data"])
 
-            # Valor por defecto si los campos están vacíos / Significa que no se extrajeron datos relevantes
             def default_if_empty(value):
                 if isinstance(value, list) and not value:
                     return ["No relevant data found for this field"]
@@ -321,30 +268,7 @@ class AssistantController:
                     return "No relevant data found for this field"
                 return value
 
-            analysis["case_info"] = default_if_empty(analysis.get("case_info", {}))
-            analysis["case_outcome"] = default_if_empty(
-                analysis.get("case_outcome", {})
-            )
-            analysis["reasons"] = default_if_empty(analysis.get("reasons", []))
-            analysis["rights_and_laws_referenced"] = default_if_empty(
-                analysis.get("rights_and_laws_referenced", [])
-            )
-
-            # Si todos los campos relevantes están vacíos o no extraídos
-            all_defaults = all(
-                v == "No relevant data found for this field"
-                or (
-                    isinstance(v, list)
-                    and all(i == "No relevant data found for this field" for i in v)
-                )
-                or (
-                    isinstance(v, dict)
-                    and all(
-                        i == "No relevant data found for this field" for i in v.values()
-                    )
-                )
-                for v in analysis.values()
-            )
+            analysis = {k: default_if_empty(v) for k, v in analysis.items()}
 
             sentence_doc = {
                 "user_id": ObjectId(g.userId),
@@ -356,7 +280,6 @@ class AssistantController:
             }
             sentencias.insert_one(sentence_doc)
 
-        # Calculate token usage and update the user's token balance
         token_usage = total_token_count / token_equivalence
         tkbController.use_tokens(g.userId, token_usage)
 
