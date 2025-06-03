@@ -2,7 +2,9 @@ import json
 import os
 from bson import ObjectId, json_util
 from controllers.util.gcp_cloudvision import scan_pdf_to_text
-from controllers.util.toolkit_funcs import process_pdf_tool, pinecone_consult_tool, mongo_sentencias_tool
+from controllers.util.toolkit_funcs import (
+    search_tool,
+)
 from mongoConnection import db
 from flask import g
 import vertexai
@@ -13,7 +15,9 @@ from vertexai.generative_models import (
     Content,
     Part,
 )
-from controllers.util.assistant_config import ASSISTANT_CONFIG, MONGO_ASSISTANT_CONFIG
+from controllers.util.assistant_config import ASSISTANT_CONFIG
+from controllers.util.mongo_assistant_config import MONGO_ASSISTANT_CONFIG
+
 from controllers.eventController import EventController
 from controllers.token_balance_controller import Token_Balance_Controller
 from datetime import datetime
@@ -111,7 +115,7 @@ class AssistantController:
     def chatSession(self, id, request):
         msg = request.form.get("msg")
         uploaded_file = request.files.get("file") if request.files else None
-
+        
         message_obj = {
             "role": "user",
             "user_question": msg,
@@ -119,11 +123,13 @@ class AssistantController:
         }
 
         if uploaded_file:
-            message_obj.update({
-                "file_url": request.form.get("file_url"),
-                "file_name": request.form.get("file_name"),
-                "file_type": request.form.get("file_type"),
-            })
+            message_obj.update(
+                {
+                    "file_url": request.form.get("file_url"),
+                    "file_name": request.form.get("file_name"),
+                    "file_type": request.form.get("file_type"),
+                }
+            )
 
         session = sessions.find_one({"_id": ObjectId(id)})
         history = session.get("history", [])
@@ -132,33 +138,31 @@ class AssistantController:
 
         for message in history:
             if message.get("role") == "user":
-                msgHistory.append(Content(role="user", parts=[Part.from_text(message["user_question"])]))
-                file_data = message.get("file_data", file_data)
+                msgHistory.append(
+                    Content(
+                        role="user", parts=[Part.from_text(message["user_question"])]
+                    )
+                )
+                file_data = message.get("file_data")
             elif message.get("role") == "model":
-                msgHistory.append(Content(role="model", parts=[Part.from_text(message["bot_response"])]))
+                msgHistory.append(
+                    Content(
+                        role="model", parts=[Part.from_text(message["bot_response"])]
+                    )
+                )
 
-        generation_config = GenerationConfig(temperature=ASSISTANT_CONFIG["LLM"]["TEMPERATURE"])
+        generation_config = GenerationConfig(
+            temperature=ASSISTANT_CONFIG["LLM"]["TEMPERATURE"]
+        )
 
-        if any(keyword in msg.lower() for keyword in ["mongo", "mongodb"]):
-            model_cfg = MONGO_ASSISTANT_CONFIG
-            model = GenerativeModel(
-                model_cfg["LLM"]["MODEL"],
-                system_instruction=model_cfg["LLM"]["SYSTEM_INSTRUCTION"],
-                generation_config=generation_config,
-                tools=[mongo_sentencias_tool],
-            )
-            prompt_template = model_cfg["LLM"]["PROMPT"]
-            current_tool_type = "mongo"
-        else:
-            model_cfg = ASSISTANT_CONFIG
-            model = GenerativeModel(
-                model_cfg["LLM"]["MODEL"],
-                system_instruction=model_cfg["LLM"]["SYSTEM_INSTRUCTION"],
-                generation_config=generation_config,
-                tools=[pinecone_consult_tool],
-            )
-            prompt_template = model_cfg["LLM"]["PROMPT"]
-            current_tool_type = "pinecone"
+        model_cfg = ASSISTANT_CONFIG
+        model = GenerativeModel(
+            model_cfg["LLM"]["MODEL"],
+            system_instruction=model_cfg["LLM"]["SYSTEM_INSTRUCTION"],
+            generation_config=generation_config,
+            tools=[search_tool],
+        )
+        prompt_template = model_cfg["LLM"]["PROMPT"]
 
         if uploaded_file and uploaded_file.filename:
             ext = self.get_file_ext(uploaded_file.filename).lower()
@@ -208,36 +212,45 @@ class AssistantController:
         response = model.generate_content(prompt)
         usage_metadata = response.usage_metadata
 
-        output_tokens = session.get("output_tokens", 0) + usage_metadata.candidates_token_count
-        input_tokens = session.get("input_tokens", 0) + usage_metadata.prompt_token_count
+        output_tokens = (
+            session.get("output_tokens", 0) + usage_metadata.candidates_token_count
+        )
+        input_tokens = (
+            session.get("input_tokens", 0) + usage_metadata.prompt_token_count
+        )
         total_token_count = output_tokens + input_tokens
 
-        call = response.candidates[0].function_calls[0] if response.candidates and response.candidates[0].function_calls else None
+        call = (
+            response.candidates[0].function_calls[0]
+            if response.candidates and response.candidates[0].function_calls
+            else None
+        )
 
         if call:
-            if current_tool_type == "pinecone" and call.name == "pinecone_consult":
-                res = consultController.search(
-                    call.args.get("article"),
-                    call.args.get("article_id"),
-                    call.args.get("document"),
-                    call.args.get("k_count"),
-                )
-                tool_result_text = f"Resultado de la herramienta pinecone_consult:\n{res}"
-
-            elif current_tool_type == "mongo" and call.name == "mongo_sentencias_consult":
-                res = consultController.search_mongo_sentencias(
-                    sentencia_id=call.args.get("sentencia_id"),
-                    document=call.args.get("document"),
-                    article_id=call.args.get("article_id"),
-                    article=call.args.get("article"),
-                    k_count=call.args.get("k_count", 5),
-                )
-                tool_result_text = f"Resultado de la herramienta mongo_sentencias_consult:\n{res}"
+            if call.name == "combined_legal_search":
+                if call.args.get("source") == "pinecone":
+                    res = consultController.search(
+                        call.args.get("article"),
+                        call.args.get("article_id"),
+                        call.args.get("document"),
+                        call.args.get("k_count"),
+                    )
+                    tool_result_text = (
+                        f"Resultado de la herramienta pinecone_consult:\n{res}"
+                    )
+                elif call.args.get("source") == "mongo_sentencias":
+                    res = consultController.search_mongo_sentencias(
+                        case_type=call.args.get("case_type", ""),
+                        user_request=message_obj,
+                    )
+                tool_result_text = res
 
             else:
                 tool_result_text = "La herramienta invocada no está implementada."
 
-            msgHistory.append(Content(role="tool", parts=[Part.from_text(tool_result_text)]))
+            msgHistory.append(
+                Content(role="tool", parts=[Part.from_text(tool_result_text)])
+            )
 
             prompt = prompt_template.format(
                 MESSAGE="Tool result received, please provide a follow-up response.",
@@ -245,9 +258,17 @@ class AssistantController:
                 FILE_DATA="",
             )
             response = model.generate_content(prompt)
-            botmsg = response.text if hasattr(response, "text") and response.text else "Respuesta generada por herramienta."
+            botmsg = (
+                response.text
+                if hasattr(response, "text") and response.text
+                else "Respuesta generada por herramienta."
+            )
         else:
-            botmsg = response.text if hasattr(response, "text") and response.text else "Respuesta generada."
+            botmsg = (
+                response.text
+                if hasattr(response, "text") and response.text
+                else "Respuesta generada."
+            )
 
         botmsg_object = {
             "role": "model",
@@ -257,6 +278,7 @@ class AssistantController:
 
         if message_obj.get("file_data"):
             from controllers.util.sentence_config import extract_fields_from_text
+
             analysis = extract_fields_from_text(message_obj["file_data"])
 
             def default_if_empty(value):

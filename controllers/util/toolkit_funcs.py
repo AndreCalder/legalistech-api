@@ -1,95 +1,48 @@
-from vertexai.generative_models import FunctionDeclaration, Tool
+from vertexai.preview.generative_models import FunctionDeclaration, Tool
 
-process_pdf = FunctionDeclaration(
-    name="process_pdf_document",
-    description="Process a PDF document and extract the text content to be used in the LLM model.",
-    parameters={
-        "type": "object",
-        "properties": {},
-    },
-)
-
-process_pdf_tool = Tool(
-    function_declarations=[process_pdf],
-)
-
-pinecone_consult = FunctionDeclaration(
-    name="pinecone_consult",
+combined_search = FunctionDeclaration(
+    name="combined_legal_search",
     description=(
-        "Search for legal documents in the Pinecone database using natural language queries in Spanish. "
+        "Perform a search in either Pinecone (semantic search for articles/laws) or MongoDB ('sentencias') "
+        "depending on the query intent. Use 'pinecone' for legal articles or laws, and 'mongo_sentencias' for case law tips."
     ),
     parameters={
         "type": "object",
         "properties": {
-            "subject": {
+            "source": {
                 "type": "string",
-                "description": "Optional. The query to search for legal documents in the Pinecone database, could be context, specific legal topic or question",
+                "enum": ["pinecone", "mongo_sentencias"],
+                "description": "Choose which backend to query: 'pinecone' for law/article queries, 'mongo_sentencias' for case law research.",
             },
             "document": {
                 "type": "string",
+                "description": "Name or fragment of the document (e.g. 'Código Civil').",
+            },
+            "case_type": {
+                "type": "string",
                 "description": (
-                    "Optional. The specific document to search in. If not provided, "
-                    "the search will be performed across all documents."
+                    "Required if source is 'mongo_sentencias'. Type of case like 'Controversias Familiares', 'Divorcios', etc."
                 ),
+            },
+            "subject": {
+                "type": "string",
+                "description": "Free-text query or topic.",
             },
             "article_id": {
                 "type": "string",
-                "description": (
-                    "Optional. The specific article to search in. If not provided, "
-                    "the search will be performed across all articles. "
-                    "For example: 'cc_articulo_123' for Código Nacional de Procedimientos Civiles y Familiares."
-                ),
+                "description": "Article ID (e.g. 'cc_articulo_123').",
             },
             "article": {
                 "type": "string",
-                "description": (
-                    "Optional. The specific article to search in. If not provided, "
-                    "the search will be performed across all articles. for example: 'artículo 123'. "
-                ),
+                "description": "Human-friendly article name (e.g. 'artículo 123').",
             },
             "k_count": {
                 "type": "integer",
-                "description": (
-                    "The number of top results to return. Defaults to 5 if not provided."
-                    " If a specific law or article is provided set it to 1, otherwise come up with a reasonable number of results to return."
-                ),
+                "description": "Number of top results to return (5 for articles, 50 for case law).",
             },
         },
-        "required": ["k_count"],
+        "required": ["source", "k_count"],
     },
 )
 
-pinecone_consult_tool = Tool(function_declarations=[pinecone_consult])
-
-mongo_sentencias_consult = FunctionDeclaration(
-    name="mongo_sentencias_consult",
-    description="Consulta documentos en la colección 'sentencias' de MongoDB.",
-    parameters={
-        "type": "object",
-        "properties": {
-            "sentencia_id": {
-                "type": "string",
-                "description": "ID de la sentencia (ObjectId como string)."
-            },
-            "document": {
-                "type": "string",
-                "description": "Nombre o fragmento del archivo (campo file_name)."
-            },
-            "article_id": {
-                "type": "string",
-                "description": "Artículo específico o ID a buscar dentro del texto del documento."
-            },
-            "article": {
-                "type": "string",
-                "description": "Artículo en lenguaje natural, como 'artículo 123'."
-            },
-            "k_count": {
-                "type": "integer",
-                "description": "Número máximo de resultados (default 5)."
-            }
-        },
-        "required": ["k_count"]
-    }
-)
-
-mongo_sentencias_tool = Tool(function_declarations=[mongo_sentencias_consult])
+search_tool = Tool.from_function_declarations([combined_search])

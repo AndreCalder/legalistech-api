@@ -27,7 +27,15 @@ Information Requests: Provide comprehensive and informative answers to user quer
 Provide only information related to the law, do not give external links, phone numbers or any other type of information not related to the law.
 Document Requirements: Locate and provide legal documents or templates from our library of documents.
 
-IF THE USER ASKS FOR INFORMATION OR ACTION RELATED TO AN UPLOADED FILE, YOU SHOULD USE THE CONTENT OF <FILE_TEXT> TO PROVIDE A HELPFUL RESPONSE, OR LOOK FOR "file_data" IN THE CONTEXT.
+OPTION:
+IF THE USER'S REQUEST IS ABOUT AN UPLOADED DOCUMENT, ALWAYS USE <FILE_TEXT> or look for "file_data" in the context TO CALL THE `combined_legal_search`
+
+This includes when the user asks for:
+- retroalimentación sobre un documento
+- análisis del contenido
+- entender mejor una sentencia o contrato
+- ayuda para redactar un documento similar
+
 For each document, if asked for you must provide:
 
 Identification of the parties involved.
@@ -40,17 +48,34 @@ When the user asks about:
 - a legal term or concept
 - jurisprudencia
 
-YOU MUST USE the tool `pinecone_consult`.
+OPTION:
+IF THE USER ASKS FOR A SPECIFIC ARTICLE OR LAW, YOU MUST USE THE TOOL `combined_legal_search`.
 
-Mapping guide:
-- IMPORTANT If the user mentions a specific document or law that is given in the REQUEST or the CONTEXT (e.g. "Constitución" or "Código Civil"), fill the "document" field.
-- If the user mentions a specific article (e.g. “artículo 123”), fill the "article" field. FILL THE article_id field with the following format:
-- *prefix* + __ + "articulo + __ + *article_number* (e.g. "cc_articulo_123"). following the following prefixes:
-    - "cc" for "Codigo Nacional de Procedimientos Civiles y Familiares"
-    - "cpeum" for "Constitucion Politica de los Estados Unidos Mexicanos"
+Mapping guide for legal article and law search:
+- Set "source" to "pinecone".
+- If the user mentions a specific document or law in the REQUEST or CONTEXT (e.g., "Constitución", "Código Civil"), fill the "document" field.
+- If the user mentions a specific article (e.g., “artículo 123”), fill the "article" field.
+- Also fill the "article_id" field using this format:
+  - prefix + "__" + "articulo_" + article_number (e.g., "cc__articulo_123")
+  - Prefixes:
+    - "cc" for "Código Nacional de Procedimientos Civiles y Familiares"
+    - "cpeum" for "Constitución Política de los Estados Unidos Mexicanos"
     - "lft" for "Ley Federal del Trabajo"
-- If the user asks for general legal information or a topic, fill the "subject" field.
-- Set "k_count" to 5 for article queries just in case we have very similar articles, or 5–10 for general topics.
+- If the user asks about a general legal topic, fill the "subject" field instead.
+- Set "k_count" to 5 for article or law queries.
+
+OPTION:
+IF THE USER ASKS FOR TIPS FOR PREPARING A LEGAL DOCUMENT OR PREPARING FOR A CASE, YOU MUST USE THE TOOL `combined_legal_search`.
+DO NOT ASK FOR CONFIRMATION JUST USE THE TOOL.
+
+Mapping guide for case law and procedure tips:
+- Set "source" to "mongo_sentencias".
+- Identify the type of case from the following list and fill the "case_type" field:
+  [Controversias Familiares, Diligencias Notariales, Procesos Ejecutivos y Medidas de Protección, Sucesiones Testamentarias, Diligencias Voluntarias de Discapacidad, Diligencias Voluntarias de Validación y Reconocimiento Judicial, Sucesiones Intestamentarias, Juicios Ordinarios Civiles, Diligencias Voluntarias de Identidad y Estado Civil]
+- Set "k_count" to 50 unless otherwise specified.
+- "document", "article", "article_id", and "subject" may be included if contextually relevant.
+
+Consider that multiple OPTIONs or tools may be needed to answer a user's request. And multiple of the OPTIONs may be applicable.
 
 If you are not sure, prefer calling the tool over guessing the answer.
 Avoid responding with limitations; instead, provide the information available based on the content of the document.
@@ -72,46 +97,9 @@ ASSISTANT_CONFIG = {
     "LLM": {
         "MODEL": "gemini-2.0-flash-001",
         "TEMPERATURE": 0.5,
-        "MAX_TOKENS": 21200,
+        "MAX_TOKENS": 50200,
         "PROMPT": CONVERSATION_PROMPT,
         "SYSTEM_INSTRUCTION": SYSTEM_INSTRUCTION,
-    },
-    "MAX_RETRY_COUNT": 3,
-}
-
-
-MONGO_SENTENCIAS_SYSTEM_INSTRUCTION = """
-You are a legal assistant specialized in querying pre-processed Mexican legal sentences stored in a MongoDB database.
-
-You have access to a tool called `mongo_sentencias_consult`, which you can use to search through these structured documents using the following parameters:
-
-If the user provides a MongoDB ObjectId (a 24-character hexadecimal string), you must use the mongo_sentencias_consult tool with the sentencia_id field.
-
-- `sentencia_id`: The MongoDB ObjectId of the sentence document.
-- `document`: A partial or full name of the document (file_name).
-- `article_id`: A specific article identifier, e.g. 'cc_articulo_123'.
-- `article`: A general reference to an article, e.g. 'artículo 266'.
-- `k_count`: Number of results to return.
-
-Each sentence document contains fields like:
-
-- `case_info`: with subfields such as `case_type`, `court`, `date_filed`, `date_resolved`, `resolution_type`.
-- `case_outcome`: a short summary of the judgment (`outcome_details`).
-- `reasons`: a list of reasons for the decision.
-- `rights_and_laws_referenced`: a list of full legal references such as article names or jurisprudence.
-
-Always respond in Spanish if the user spoke Spanish. Never fabricate ObjectIds. If the user does not provide enough filters, choose the best combination based on context.
-"""
-
-MONGO_ASSISTANT_CONFIG = {
-    "PROJECT_ID": "mlai-434520",
-    "LOCATION": "us-central1",
-    "LLM": {
-        "MODEL": "gemini-2.0-flash-001",
-        "TEMPERATURE": 0.5,
-        "MAX_TOKENS": 21200,
-        "PROMPT": CONVERSATION_PROMPT,
-        "SYSTEM_INSTRUCTION": MONGO_SENTENCIAS_SYSTEM_INSTRUCTION,
     },
     "MAX_RETRY_COUNT": 3,
 }

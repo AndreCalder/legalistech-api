@@ -2,42 +2,94 @@ import os
 from pinecone.grpc import PineconeGRPC as Pinecone
 import re
 import unicodedata
+from controllers.util.mongo_assistant_config import MONGO_ASSISTANT_CONFIG
 from mongoConnection import db
 from bson import ObjectId
+import vertexai
+from google.oauth2 import service_account
+from vertexai.generative_models import (
+    GenerativeModel,
+    GenerationConfig,
+    Content,
+    Part,
+)
+from bson import json_util
+
+
+sentencias = db["sentencias"]
+
+
+def decodify(raw_text):
+
+    cases = []
+
+    for block in raw_text.split("#CASE"):
+        if not block.strip():
+            continue
+        case = {}
+        case["type"] = re.search(r"TYPE:\s*(.+)", block).group(1)
+        case["resolution"] = re.search(r"RESOLUTION:\s*(.+)", block).group(1)
+        case["outcome"] = re.search(r"OUTCOME:\s*(.+)", block).group(1)
+        case["reasons"] = re.search(r"REASONS:\s*(.+)", block).group(1).split(")")
+        case["laws"] = re.findall(r"([A-Z]+):([\d\w]+)", block)
+        cases.append(case)
+        
+    return cases
 
 
 def get_numeric_id(item):
     match = re.search(r"\d+", item["id"])
     return int(match.group()) if match else 0
 
+
 class ConsultController:
 
     def __init__(self):
         self.sentencias = db["sentencias"]
 
-    def search_mongo_sentencias(self, sentencia_id=None, document=None, article_id=None, article=None, k_count=5):
-        query = {}
-        if sentencia_id:
-            query["_id"] = ObjectId(sentencia_id)
-        if document:
-            query["file_name"] = {"$regex": document, "$options": "i"}
-        # ...otros filtros si se requieren...
+    def search_mongo_sentencias(self, case_type, user_request):
 
-        result = self.sentencias.find_one(query)
-        if result:
-            # Extrae los campos importantes
-            return {
-                "file_name": result.get("file_name", "Sin nombre"),
-                "case_info": result.get("case_info", {}),
-                "case_outcome": result.get("case_outcome", {}),
-                "reasons": result.get("reasons", []),
-                "rights_and_laws_referenced": result.get("rights_and_laws_referenced", [])
-            }
-        return {"message": "No se encontró la sentencia."}
+        print(case_type)
+        print(user_request.get("file_data"))
+        found_sentencias = sentencias.find(
+            {
+                "case_info.case_type": case_type,
+            },
+            {
+                "_id": 0,
+                "case_info.court": 0,
+                "case_info.court": 0,
+                "case_info.date_resolved": 0,
+                "case_info.date_filed": 0,
+            },
+        )
 
+        formatted_sentencias = json_util.loads(json_util.dumps(found_sentencias))
 
+        model_cfg = MONGO_ASSISTANT_CONFIG
 
+        generation_config = GenerationConfig(
+            temperature=MONGO_ASSISTANT_CONFIG["LLM"]["TEMPERATURE"]
+        )
 
+        model = GenerativeModel(
+            model_cfg["LLM"]["MODEL"],
+            system_instruction=model_cfg["LLM"]["SYSTEM_INSTRUCTION"],
+            generation_config=generation_config,
+        )
+
+        prompt_template = model_cfg["LLM"]["PROMPT"]
+        prompt = prompt_template.format(
+            MESSAGE=user_request.get("user_question"),
+            FILE_DATA=user_request.get("file_data"),
+            SENTENCES=formatted_sentencias,
+        )
+        
+        print(prompt)
+
+        response = model.generate_content(prompt)
+
+        return response.text
 
     def normalize_string(self, text: str) -> str:
         # Remove accents (é → e, ñ → n, etc.)
@@ -57,7 +109,6 @@ class ConsultController:
 
     def search(self, query, id=None, document=None, k_count=5):
 
-        print("K_COUNT:", k_count)
         pc = Pinecone(api_key=os.getenv("PINECONE_API_KEY"))
         index = pc.Index("milegalista")
         query_embedding = pc.inference.embed(
@@ -65,7 +116,7 @@ class ConsultController:
             inputs=[f"query: {query}"],
             parameters={"input_type": "query"},
         )
-        
+
         # Optional document filtering
         filter_query = {}
         if document:
