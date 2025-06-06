@@ -17,7 +17,7 @@ def validate_token():
 
     if not token_data.get("isValid"):
         return {"message": "Invalid token"}, 401
-
+    print(token_data)
     g.userId = token_data.get("user_id")
 
 

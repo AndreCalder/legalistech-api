@@ -115,7 +115,7 @@ class AssistantController:
     def chatSession(self, id, request):
         msg = request.form.get("msg")
         uploaded_file = request.files.get("file") if request.files else None
-        
+
         message_obj = {
             "role": "user",
             "user_question": msg,
@@ -220,6 +220,33 @@ class AssistantController:
         )
         total_token_count = output_tokens + input_tokens
 
+        # Teoría André: Necesitamos que el modelo identifique si se debe invocar una herramienta más de una vez,
+        # posiblemente sea en response.candidates[0].function_calls, y debamos iterar sobre esa lista, en caso de iterar,
+        # vamos a tener que juntar las respuestas de las herramientas en un solo mensaje para procesar en un solo prompt (linea 254)
+        # EJ:
+        # Que cualquier escenario se pueda resolver con 2 llamadas
+        # Pinecone para búsuqeda de artículos, legislación y jurísprudencias 
+        # *Posibles mejoras: Tener la capacidad de buscar múltiples artículos a la vez 
+        # Mongo para consulta de sentencias *Posibles mejoras: Múltiples tipos de caso, proponer idea de mejora de rendimiento
+        """
+            function_calls: [
+                {
+                    name: "combined_legal_search",
+                    args: {
+                        source: "pinecone",
+                        ...
+                    }
+                },
+                {
+                    name: "combined_legal_search",
+                    args: {
+                        source: "mongo_sentencias",
+                        ...
+                    }
+                }
+            ]
+        """
+        
         call = (
             response.candidates[0].function_calls[0]
             if response.candidates and response.candidates[0].function_calls
@@ -229,6 +256,8 @@ class AssistantController:
         if call:
             if call.name == "combined_legal_search":
                 if call.args.get("source") == "pinecone":
+                    # Posible solución para múltiples artículos: Convertir los argumentos en un arreglo de objetos e iterar sobre ellos dentro de la función
+                    # Cambiar system_instructions en el assistant_config para que pueda identificar multiples artículos y documentos en caso de ser necesario
                     res = consultController.search(
                         call.args.get("article"),
                         call.args.get("article_id"),

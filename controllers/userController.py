@@ -25,10 +25,14 @@ class UserController:
         if customer_id:
             stripe.api_key = os.getenv("STRIPE_SECRET")
             subs = stripe.Subscription.list(customer=customer_id)
-            subscription = subs.data[0]
+            subscription = subs.data[0] if subs.data else None
             user["subscription"] = subscription
 
-            subPack = subscriptions.find_one({"priceId": subscription.plan.id})
+            subPack = (
+                subscriptions.find_one({"priceId": subscription.plan.id})
+                if subscription
+                else None
+            )
             user["subPack"] = subPack
 
         return json.loads(json_util.dumps(user))
@@ -60,7 +64,7 @@ class UserController:
         # Send pin_code via email here
         pin_code = generate_pin_for_user(str(created_id))
         send_pin_email(email, pin_code, str(created_id))
-        
+
         return {"userId": str(created_id)}, 200
 
     def update_user(self, data):

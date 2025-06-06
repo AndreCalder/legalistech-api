@@ -49,15 +49,12 @@ class ConsultController:
 
     def search_mongo_sentencias(self, case_type, user_request):
 
-        print(case_type)
-        print(user_request.get("file_data"))
         found_sentencias = sentencias.find(
             {
                 "case_info.case_type": case_type,
             },
             {
                 "_id": 0,
-                "case_info.court": 0,
                 "case_info.court": 0,
                 "case_info.date_resolved": 0,
                 "case_info.date_filed": 0,
@@ -85,8 +82,6 @@ class ConsultController:
             SENTENCES=formatted_sentencias,
         )
         
-        print(prompt)
-
         response = model.generate_content(prompt)
 
         return response.text
@@ -122,6 +117,9 @@ class ConsultController:
         if document:
             filter_query["documento"] = {"$eq": self.normalize_string(document)}
 
+        # Aquí se agregaría la iteración en caso de hacer múltiples consultas
+        # Por ahora, solo se hace una consulta con el query y el filtro
+        # juntar todos los results en un arreglo general
         results = index.query(
             namespace="milegalista",
             vector=query_embedding[0].values,
