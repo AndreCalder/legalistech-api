@@ -1,10 +1,12 @@
 from vertexai.preview.generative_models import FunctionDeclaration, Tool
 
+# Función combinada que permite búsquedas en Pinecone (artículos/leyes) o MongoDB (jurisprudencia).
 combined_search = FunctionDeclaration(
     name="combined_legal_search",
     description=(
-        "Perform a search in either Pinecone (semantic search for articles/laws) or MongoDB ('sentencias') "
-        "depending on the query intent. Use 'pinecone' for legal articles or laws, and 'mongo_sentencias' for case law tips."
+        "Realiza una búsqueda en Pinecone (búsqueda semántica de artículos/leyes) "
+        "o en MongoDB ('sentencias') dependiendo de la intención del usuario. "
+        "Usa 'pinecone' para artículos legales y leyes, y 'mongo_sentencias' para jurisprudencia."
     ),
     parameters={
         "type": "object",
@@ -12,37 +14,61 @@ combined_search = FunctionDeclaration(
             "source": {
                 "type": "string",
                 "enum": ["pinecone", "mongo_sentencias"],
-                "description": "Choose which backend to query: 'pinecone' for law/article queries, 'mongo_sentencias' for case law research.",
+                "description": (
+                    "Indica el origen de la búsqueda: 'pinecone' para leyes o artículos, "
+                    "'mongo_sentencias' para jurisprudencia."
+                ),
             },
             "document": {
                 "type": "string",
-                "description": "Name or fragment of the document (e.g. 'Código Civil').",
+                "description": "Nombre o fragmento del documento legal (por ejemplo, 'Código Civil').",
             },
             "case_type": {
                 "type": "string",
                 "description": (
-                    "Required if source is 'mongo_sentencias'. Type of case like 'Controversias Familiares', 'Divorcios', etc."
+                    "Obligatorio si source es 'mongo_sentencias'. Tipo de caso: "
+                    "'Controversias Familiares', 'Divorcios', etc."
                 ),
             },
             "subject": {
                 "type": "string",
-                "description": "Free-text query or topic.",
+                "description": "Consulta en lenguaje natural o tema general.",
             },
             "article_id": {
                 "type": "string",
-                "description": "Article ID (e.g. 'cc_articulo_123').",
+                "description": "ID del artículo (por ejemplo, 'cc_articulo_123').",
             },
             "article": {
                 "type": "string",
-                "description": "Human-friendly article name (e.g. 'artículo 123').",
+                "description": "Nombre legible del artículo (por ejemplo, 'artículo 123').",
             },
             "k_count": {
                 "type": "integer",
-                "description": "Number of top results to return (5 for articles, 50 for case law).",
+                "description": (
+                    "Número de resultados relevantes a devolver. "
+                    "Usualmente 5 para artículos y 50 para sentencias judiciales."
+                ),
             },
         },
         "required": ["source", "k_count"],
     },
 )
 
-search_tool = Tool.from_function_declarations([combined_search])
+# Función para limpiar historial de la sesión actual.
+clear_history = FunctionDeclaration(
+    name="reset_session_history",
+    description="Borra el historial de la sesión actual si el usuario lo solicita explícitamente.",
+    parameters={
+        "type": "object",
+        "properties": {
+            "session_id": {
+                "type": "string",
+                "description": "ID de sesión (ObjectId de MongoDB, string hexadecimal de 24 caracteres).",
+            }
+        },
+        "required": ["session_id"],
+    },
+)
+
+# Herramienta principal expuesta a Gemini, incluye búsqueda legal y limpieza de sesión
+search_tool = Tool.from_function_declarations([combined_search, clear_history])

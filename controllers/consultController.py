@@ -1,125 +1,66 @@
 import os
-from pinecone.grpc import PineconeGRPC as Pinecone
 import re
 import unicodedata
-from controllers.util.mongo_assistant_config import MONGO_ASSISTANT_CONFIG
+from datetime import datetime
+from bson import ObjectId, json_util
+from pinecone.grpc import PineconeGRPC as Pinecone
 from mongoConnection import db
-from bson import ObjectId
-import vertexai
+from controllers.util.mongo_assistant_config import MONGO_ASSISTANT_CONFIG
 from google.oauth2 import service_account
-from vertexai.generative_models import (
-    GenerativeModel,
-    GenerationConfig,
-    Content,
-    Part,
-)
-from bson import json_util
+from vertexai.generative_models import GenerativeModel, GenerationConfig
 
-
+# 📚 Colección de sentencias judiciales
 sentencias = db["sentencias"]
 
-
-def decodify(raw_text):
-
-    cases = []
-
-    for block in raw_text.split("#CASE"):
-        if not block.strip():
-            continue
-        case = {}
-        case["type"] = re.search(r"TYPE:\s*(.+)", block).group(1)
-        case["resolution"] = re.search(r"RESOLUTION:\s*(.+)", block).group(1)
-        case["outcome"] = re.search(r"OUTCOME:\s*(.+)", block).group(1)
-        case["reasons"] = re.search(r"REASONS:\s*(.+)", block).group(1).split(")")
-        case["laws"] = re.findall(r"([A-Z]+):([\d\w]+)", block)
-        cases.append(case)
-        
-    return cases
-
-
-def get_numeric_id(item):
-    match = re.search(r"\d+", item["id"])
-    return int(match.group()) if match else 0
-
-
 class ConsultController:
-
     def __init__(self):
-        self.sentencias = db["sentencias"]
-
-    def search_mongo_sentencias(self, case_type, user_request):
-
-        found_sentencias = sentencias.find(
-            {
-                "case_info.case_type": case_type,
-            },
-            {
-                "_id": 0,
-                "case_info.court": 0,
-                "case_info.date_resolved": 0,
-                "case_info.date_filed": 0,
-            },
-        )
-
-        formatted_sentencias = json_util.loads(json_util.dumps(found_sentencias))
-
-        model_cfg = MONGO_ASSISTANT_CONFIG
-
-        generation_config = GenerationConfig(
-            temperature=MONGO_ASSISTANT_CONFIG["LLM"]["TEMPERATURE"]
-        )
-
-        model = GenerativeModel(
-            model_cfg["LLM"]["MODEL"],
-            system_instruction=model_cfg["LLM"]["SYSTEM_INSTRUCTION"],
-            generation_config=generation_config,
-        )
-
-        prompt_template = model_cfg["LLM"]["PROMPT"]
-        prompt = prompt_template.format(
-            MESSAGE=user_request.get("user_question"),
-            FILE_DATA=user_request.get("file_data"),
-            SENTENCES=formatted_sentencias,
-        )
-        
-        response = model.generate_content(prompt)
-
-        return response.text
+        self.sentencias = sentencias
 
     def normalize_string(self, text: str) -> str:
-        # Remove accents (é → e, ñ → n, etc.)
-        text = (
-            unicodedata.normalize("NFKD", text)
-            .encode("ASCII", "ignore")
-            .decode("utf-8")
-        )
-
-        # Remove all non-alphanumeric characters (except spaces)
+        """
+        Normaliza una cadena para eliminar acentos y símbolos especiales.
+        Utilizado para construir filtros de búsqueda más robustos.
+        """
+        text = unicodedata.normalize("NFKD", text).encode("ASCII", "ignore").decode("utf-8")
         text = re.sub(r"[^a-zA-Z0-9\s]", "", text)
-
-        # Optional: remove extra spaces
-        text = re.sub(r"\s+", " ", text).strip()
-
-        return text
+        return re.sub(r"\s+", " ", text).strip()
 
     def search(self, query, id=None, document=None, k_count=5):
-
+        """
+        Realiza una búsqueda en Pinecone. Si k_count == 1 y se proporciona un ID,
+        intenta obtener el documento exacto vía fetch(). De lo contrario,
+        ejecuta búsqueda semántica por vector.
+        """
         pc = Pinecone(api_key=os.getenv("PINECONE_API_KEY"))
         index = pc.Index("milegalista")
+
+        # 🎯 Si k_count = 1 y hay ID, intentamos obtener solo ese artículo directamente
+        if k_count == 1 and id:
+            print(f"[DEBUG] Realizando búsqueda directa por ID debido a k_count = 1")
+            exact, status = self.get_by_id(id)
+            if status == 200:
+                return {"exact_match": exact, "similar_matches": []}
+            else:
+                print(f"[DEBUG] No se encontró el artículo exacto con ID: {id}")
+                return {"exact_match": None, "similar_matches": []}
+
+        # ✨ Búsqueda vectorial semántica
+        embed_input = f"{query} en el contexto de {document}" if document and query else query or document
+        print(f"[DEBUG] PINECONE_EMBED INPUT → '{embed_input}'")
+
         query_embedding = pc.inference.embed(
             model="multilingual-e5-large",
-            inputs=[f"query: {query}"],
+            inputs=[embed_input],
             parameters={"input_type": "query"},
         )
 
-        # Optional document filtering
         filter_query = {}
         if document:
-            filter_query["documento"] = {"$eq": self.normalize_string(document)}
+            norm_doc = self.normalize_string(document)
+            print(f"[DEBUG] Normalized document: '{norm_doc}'")
+            if norm_doc:
+                filter_query["documento"] = {"$eq": norm_doc}
 
-        # Aquí se agregaría la iteración en caso de hacer múltiples consultas
-        # Por ahora, solo se hace una consulta con el query y el filtro
-        # juntar todos los results en un arreglo general
         results = index.query(
             namespace="milegalista",
             vector=query_embedding[0].values,
@@ -128,28 +69,88 @@ class ConsultController:
             include_metadata=True,
             filter=filter_query,
         )
-        result_arr = []
 
-        results.matches.sort(key=lambda x: x.get("score", 0), reverse=True)
+        print(f"[DEBUG] Returned {len(results.matches)} raw matches")
 
-        print(results)
-        print(id)
-        if id:
-            results.matches = [
-                match for match in results.matches if match.get("id") == id
-            ]
+        exact_match = None
+        similar_matches = []
 
-        for match in results.matches:
-            if match.get("score") > 0.7:
-                result_arr.append(
-                    {"id": match.get("id"), "metadata": match.get("metadata")}
-                )
+        for i, match in enumerate(results.matches):
+            match_id = match.get("id")
+            score = match.get("score", 0)
+            metadata = match.get("metadata", {})
 
-        return result_arr
+            print(f"\n[DEBUG] RAW MATCH {i+1}")
+            print(f"ID: {match_id}")
+            print(f"SCORE: {score}")
+            print(f"DOCUMENTO: {metadata.get('documento')}")
+            print(f"TEXTO: {metadata.get('texto', '')[:300]}...")
 
-    # Create get by ID method, return only one result.
+            result_obj = {
+                "id": match_id,
+                "score": score,
+                "metadata": metadata,
+            }
+
+            # Si coincide exactamente con el ID proporcionado
+            if id and match_id == id:
+                exact_match = result_obj
+                print(f"[DEBUG] ✅ ID exacto '{id}' encontrado entre los matches.")
+
+            if score > 0.7 and match_id != id:
+                similar_matches.append(result_obj)
+
+        if id and not exact_match:
+            print(f"[DEBUG] ⚠️ No se encontró el artículo exacto '{id}' en los resultados relevantes.")
+
+        if not exact_match and not similar_matches:
+            print("[DEBUG] No matches exceeded the threshold (> 0.7)")
+
+        return {
+            "exact_match": exact_match,
+            "similar_matches": similar_matches
+        }
+
+    def search_mongo_sentencias(self, case_type, user_request):
+        """
+        Recupera sentencias del tipo solicitado desde MongoDB y
+        genera una respuesta contextual con Vertex AI.
+        """
+        mongo_query = {"case_info.case_type": case_type}
+        projection = {
+            "case_info.court": 0,
+            "case_info.date_resolved": 0,
+            "case_info.date_filed": 0,
+        }
+
+        found = list(self.sentencias.find(mongo_query, projection))
+        print(f"[DEBUG] Found {len(found)} sentencias for case_type '{case_type}'")
+
+        for s in found:
+            s.pop("_id", None)
+
+        model_cfg = MONGO_ASSISTANT_CONFIG
+        generation_config = GenerationConfig(temperature=model_cfg["LLM"]["TEMPERATURE"])
+        model = GenerativeModel(
+            model_cfg["LLM"]["MODEL"],
+            system_instruction=model_cfg["LLM"]["SYSTEM_INSTRUCTION"],
+            generation_config=generation_config,
+        )
+
+        prompt = model_cfg["LLM"]["PROMPT"].format(
+            MESSAGE=user_request.get("user_question"),
+            FILE_DATA=user_request.get("file_data"),
+            SENTENCES=json_util.loads(json_util.dumps(found)),
+        )
+
+        response = model.generate_content(prompt)
+        return response.text
 
     def get_by_id(self, document_id):
+        """
+        Recupera un artículo exacto desde Pinecone usando su ID directo.
+        Usado para truncar búsquedas cuando solo se pide un artículo.
+        """
         pc = Pinecone(api_key=os.getenv("PINECONE_API_KEY"))
         index = pc.Index("milegalista")
 
@@ -157,12 +158,13 @@ class ConsultController:
             results = index.fetch(ids=[document_id], namespace="milegalista")
             match = results.vectors.get(document_id)
             if match:
+                print(f"[DEBUG] Documento encontrado por ID '{document_id}'.")
                 return {
                     "id": match.get("id"),
                     "metadata": match.get("metadata"),
                 }, 200
-            else:
-                return {"error": "Document not found"}, 404
-
+            print(f"[DEBUG] Documento no encontrado por ID '{document_id}'.")
+            return {"error": "Document not found"}, 404
         except Exception as e:
+            print(f"[DEBUG] Error al buscar por ID '{document_id}': {str(e)}")
             return {"error": str(e)}, 500

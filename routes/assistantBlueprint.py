@@ -39,3 +39,4 @@ def update_session(id):
 @assistant_Router.route("/sendMsg/<id>", methods=["POST"])
 def send_msg(id):
     return assistantController.chatSession(id, request)
+
