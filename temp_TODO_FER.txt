@@ -1,0 +1,94 @@
+# TODO – Fiducia API Manual Testing Checklist (via Postman)
+
+== BASE URL ==
+http://localhost:5000
+
+===============================
+== ENLACE - EXPEDIENT METHODS ==
+===============================
+
+[ ] 1. GET /enlace/states
+    - Method: GET
+    - No body
+    - ✅ Expect: List of states
+
+[ ] 2. POST /enlace/courts
+    - Method: POST
+    - Body:
+      {
+        "estado": "cmx"
+      }
+    - ✅ Expect: List of courts for the state
+
+[ ] 3. POST /enlace/expedients
+    - Method: POST
+    - Body:
+      {
+        "estado": "cmx",
+        "entidad": "estatal",
+        "expediente": "1/2024",
+        "materia_id": 1,
+        "juzgado_id": 1
+      }
+    - ✅ Expect: Expedient data
+
+[ ] 4. POST /enlace/expedients/history
+    - Method: POST
+    - Body:
+      {
+        "estado": "cmx",
+        "entidad": "estatal",
+        "expediente_id": 12848456
+      }
+    - ✅ Expect: History of agreements/events
+
+[ ] 5. POST /enlace/assistant
+    - Method: POST
+    - Body:
+      {
+        "estado": "cmx",
+        "entidad": "estatal",
+        "carpeta_id": 3341,
+        "fecha": "2024-01-01",
+        "hasta": "2025-03-04"
+      }
+    - ✅ Expect: List of related expedients
+
+==============================
+== ENLACE - BINDER MANAGEMENT ==
+==============================
+
+[ ] 6. POST /enlace/binders
+    - Method: POST
+    - Body:
+      {
+        "estado": "cmx",
+        "entidad": "estatal",
+        "carpeta": "My API Binder"
+      }
+    - ✅ Expect: Created binder returned, saved to MongoDB
+
+[ ] 7. PUT /enlace/binders/<binder_id>
+    - Method: PUT
+    - Body:
+      {
+        "carpeta": "Renamed Binder"
+      }
+    - ✅ Expect: Binder renamed via Enlace + updated locally
+
+[ ] 8. DELETE /enlace/binders/<binder_id>
+    - Method: DELETE
+    - Body:
+      {
+        "carpeta_id": <binder_id>
+      }
+    - ✅ Expect: Binder deleted via Enlace + removed from MongoDB
+
+============================
+== LOCAL - BINDER LISTING ==
+============================
+
+[ ] 9. GET /binders/
+    - Method: GET
+    - No body
+    - ✅ Expect: List of binders from MongoDB

@@ -16,6 +16,10 @@ consult_Router = Blueprint("consultRouter", __name__)
 @consult_Router.route("/", methods=["POST"])
 def search():
     req = request.json
-    search = req.get("query")
+    query = req.get("query")
+    document = req.get("document")
+    return consultController.search(query, document)
 
-    return consultController.search(search)
+@consult_Router.route("/<id>", methods=["GET"])
+def get_by_id(id):
+    return consultController.get_by_id(id)

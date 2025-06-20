@@ -1,39 +1,74 @@
-from vertexai.generative_models import FunctionDeclaration, Tool
+from vertexai.preview.generative_models import FunctionDeclaration, Tool
 
-process_pdf = FunctionDeclaration(
-    name="process_pdf_document",
-    description="Process a PDF document and extract the text content to be used in the LLM model.",
-    parameters={
-        "type": "object",
-        "properties": {},
-    },
-)
-
-process_pdf_tool = Tool(
-    function_declarations=[process_pdf],
-)
-
-pinecone_consult = FunctionDeclaration(
-    name="pinecone_consult",
+# Función combinada que permite búsquedas en Pinecone (artículos/leyes) o MongoDB (jurisprudencia).
+combined_search = FunctionDeclaration(
+    name="combined_legal_search",
     description=(
-        "Search the legal vector database in Spanish for constitutional articles, laws, or jurisprudence relevant to the user's request. "
-        "Use this tool when additional legal context may help clarify or support your response. "
-        "Generate one or more well-formed legal queries in Spanish, based on the arguments found in the user's message or uploaded document."
+        "Realiza una búsqueda en Pinecone (búsqueda semántica de artículos/leyes) "
+        "o en MongoDB ('sentencias') dependiendo de la intención del usuario. "
+        "Usa 'pinecone' para artículos legales y leyes, y 'mongo_sentencias' para jurisprudencia."
     ),
     parameters={
         "type": "object",
         "properties": {
-            "queries": {
-                "type": "array",
-                "items": {
-                    "type": "string",
-                    "description": "A natural language legal query written in Spanish, focused on a specific argument or legal concern.",
-                },
-                "description": "An array of legal search queries in Spanish, each one addressing a distinct argument or legal issue.",
-            }
+            "source": {
+                "type": "string",
+                "enum": ["pinecone", "mongo_sentencias"],
+                "description": (
+                    "Indica el origen de la búsqueda: 'pinecone' para leyes o artículos, "
+                    "'mongo_sentencias' para jurisprudencia."
+                ),
+            },
+            "document": {
+                "type": "string",
+                "description": "Nombre o fragmento del documento legal (por ejemplo, 'Código Civil').",
+            },
+            "case_type": {
+                "type": "string",
+                "description": (
+                    "Obligatorio si source es 'mongo_sentencias'. Tipo de caso: "
+                    "'Controversias Familiares', 'Divorcios', etc."
+                ),
+            },
+            "subject": {
+                "type": "string",
+                "description": "Consulta en lenguaje natural o tema general.",
+            },
+            "article_id": {
+                "type": "string",
+                "description": "ID del artículo (por ejemplo, 'cc_articulo_123').",
+            },
+            "article": {
+                "type": "string",
+                "description": "Nombre legible del artículo (por ejemplo, 'artículo 123').",
+            },
+            "k_count": {
+                "type": "integer",
+                "description": (
+                    "Número de resultados relevantes a devolver. "
+                    "Usualmente 5 para artículos y 50 para sentencias judiciales."
+                ),
+            },
         },
-        "required": [],
+        "required": ["source", "k_count"],
     },
 )
 
-pinecone_consult_tool = Tool(function_declarations=[pinecone_consult])
+# Función para limpiar historial de la sesión actual.
+clear_history = FunctionDeclaration(
+    name="reset_session_history",
+    description="Borra el historial de la sesión actual si el usuario lo solicita explícitamente.",
+    parameters={
+        "type": "object",
+        "properties": {
+            "session_id": {
+                "type": "string",
+                "description": "ID de sesión (ObjectId de MongoDB, string hexadecimal de 24 caracteres).",
+            }
+        },
+        "required": ["session_id"],
+    },
+)
+
+# Herramienta principal expuesta a Gemini, incluye búsqueda legal y limpieza de sesión
+search_tool = Tool.from_function_declarations([combined_search, clear_history])
