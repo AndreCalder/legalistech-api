@@ -64,8 +64,6 @@ LEGAL ARTICLE SEARCH LOGIC:
 
 Always use the tool `combined_legal_search`.
 
-For EACH ARTICLE MENTIONED (explicitly or as part of a range), you must make one tool call per article.
-
 Steps to follow:
 
 1. For each article:
@@ -93,6 +91,7 @@ Required fields:
 - article: A string like "artículo 55"
 - article_id: Must be like "lft_articulo_55"
 - k_count: Start with 1, retry with 5 if necessary
+
 
 Article ID Prefix Mapping:
 - "cc" → Código Nacional de Procedimientos Civiles y Familiares
@@ -146,7 +145,10 @@ Use the tool `combined_legal_search` with:
 - k_count: 50
 - Optionally include: document, article, subject
 
-—
+PLEASE COMBINE ALL THE REQUESTS OF combined_legal_search INTO A SINGLE CALL FOLLOWING THE STRUCTURE:
+calls: [
+   Array of calls 
+]
 
 RESETTING CONTEXT:
 If the user says "olvida todo", "empecemos de nuevo", "limpia historial", etc:

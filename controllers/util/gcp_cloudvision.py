@@ -1,3 +1,10 @@
+# Change Log
+# - Added Google Cloud Vision API integration for OCR processing of PDF files.
+# === Andre - Moved file opening to top for better readability and performance.
+# - Implemented `scan_pdf_to_text` function to convert PDF files to images and extract text using Vision API.
+# - Utilized `ThreadPoolExecutor` for parallel processing of images to improve performance.
+# - Added utility functions for image conversion and OCR processing.
+
 from google.cloud import vision
 import io
 import base64
@@ -5,6 +12,18 @@ from controllers.util.pdftoimg import pdf_to_images
 import os
 import tempfile
 import json
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from google.cloud.vision import Image as VisionImage
+
+current_dir = os.path.dirname(os.path.abspath(__file__))
+
+# Build the full path to the JSON file
+json_path = os.path.join(current_dir, "service_key.json")
+
+with open(json_path) as f:
+    account_info = json.load(f)
+
+vision_client = vision.ImageAnnotatorClient.from_service_account_info(account_info)
 
 
 def image_to_base64(image):
@@ -14,42 +33,37 @@ def image_to_base64(image):
     return base64.b64encode(buffered.getvalue()).decode("utf-8")
 
 
-# Get the absolute path to the current directory
-current_dir = os.path.dirname(os.path.abspath(__file__))
+def _ocr_image(img):
+    """
+    Helper que convierte una PIL.Image a texto usando Vision API.
+    """
+    # 1) Convertir la imagen a bytes (evita Base64 extra, usa BytesIO)
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    content = buf.getvalue()
 
-# Build the full path to the JSON file
-json_path = os.path.join(current_dir, "service_key.json")
+    # 2) Construir la petición
+    vision_img = VisionImage(content=content)
 
-with open(json_path) as f:
-    account_info = json.load(f)
+    # 3) Llamar a OCR
+    response = vision_client.text_detection(image=vision_img)
+    texts = response.text_annotations or []
+
+    # 4) Devolver el texto concatenado
+    return " ".join(text.description for text in texts)
 
 
-def send_images_to_vision(images):
-    # Initialize the Vision API client with the service account info
-    client = vision.ImageAnnotatorClient.from_service_account_info(account_info)
+def send_images_to_vision(images, max_workers=10):
+    """
+    Procesa una lista de PIL.Images en paralelo, haciendo OCR en cada una.
+    """
     all_texts = []
 
-    # For each image, convert it to base64 and send it to the Vision API
-    for idx, img in enumerate(images):
-        # Convert the PIL image to base64
-        img_base64 = image_to_base64(img)
-
-        # Create the image request for Vision API
-        image = vision.Image(content=img_base64)
-
-        # Perform text detection (or other types like label detection)
-        response = client.text_detection(image=image)
-        texts = response.text_annotations
-
-        doc_text = " ".join([text.description for text in texts])
-
-        # Append the detected text to the list
-        all_texts.append(doc_text)
-
-    # Join the texts from all images into a single string and return
-    document_text = " ".join(all_texts)
-
-    return document_text
+    # 1) Creamos el pool de hilos
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        texts = list(executor.map(_ocr_image, images))
+    print(" ".join(texts))
+    return " ".join(texts)
 
 
 output_folder = tempfile.mkdtemp()

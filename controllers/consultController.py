@@ -1,3 +1,7 @@
+# Change Log
+# - Implemented ConsultController for handling legal document searches and retrievals.
+# === Andre - Moved import statements to the top for better organization & performance.
+
 import os
 import re
 import unicodedata
@@ -11,6 +15,9 @@ from vertexai.generative_models import GenerativeModel, GenerationConfig
 
 # 📚 Colección de sentencias judiciales
 sentencias = db["sentencias"]
+pc = Pinecone(api_key=os.getenv("PINECONE_API_KEY"))
+index = pc.Index("milegalista")
+
 
 class ConsultController:
     def __init__(self):
@@ -31,8 +38,7 @@ class ConsultController:
         intenta obtener el documento exacto vía fetch(). De lo contrario,
         ejecuta búsqueda semántica por vector.
         """
-        pc = Pinecone(api_key=os.getenv("PINECONE_API_KEY"))
-        index = pc.Index("milegalista")
+
 
         # 🎯 Si k_count = 1 y hay ID, intentamos obtener solo ese artículo directamente
         if k_count == 1 and id:
