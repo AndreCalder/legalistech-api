@@ -10,7 +10,6 @@ from google.oauth2 import service_account
 from vertexai.generative_models import GenerativeModel, GenerationConfig, Content, Part
 import vertexai
 from io import BytesIO
-from mongoConnection import db
 from controllers.util.gcp_cloudvision import scan_pdf_to_text
 from controllers.util.toolkit_funcs import search_tool, clear_history
 from controllers.util.assistant_config import ASSISTANT_CONFIG
@@ -20,6 +19,7 @@ from controllers.token_balance_controller import Token_Balance_Controller
 from controllers.consultController import ConsultController
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from mongoConnection import db
 
 # Inicializa credenciales para Vertex AI
 credentials = service_account.Credentials.from_service_account_file(
@@ -198,6 +198,14 @@ class AssistantController:
             generation_config=generation_config,
             tools=[search_tool],
         )
+        streaming_model = GenerativeModel(
+        ASSISTANT_CONFIG["LLM"].get("STREAM_MODEL", ASSISTANT_CONFIG["LLM"]["MODEL"]),
+        system_instruction=ASSISTANT_CONFIG["LLM"]["SYSTEM_INSTRUCTION"],
+        generation_config=GenerationConfig(
+            temperature=ASSISTANT_CONFIG["LLM"]["TEMPERATURE"]
+        ),
+        tools=[search_tool],
+        )
         prompt_template = ASSISTANT_CONFIG["LLM"]["PROMPT"]
 
         if uploaded_file and uploaded_file.filename:
@@ -241,27 +249,35 @@ class AssistantController:
         @stream_with_context
         def generate_response(p):
 
-            function_call = None
-
-            first_stream = model.generate_content(p, stream=True)
-
-            function_call = None
+            calls = []  # Acumularemos aquí todas las llamadas a herramientas
             usage_metadata = None
-            
-            # Iterar sobre los chunks del stream
-            for chunk in first_stream:
-               
-                usage_metadata = getattr(chunk, "usage_metadata", None)
-                # Check if the chunk has a function call
-                if getattr(chunk, "function_call", None):
-                    print(chunk.function_call)
-                    function_call = chunk.function_call
-                    break
-                
-                print("========= Chunk ==========")
-                yield chunk.text
 
-            print(function_call)
+            first_stream = streaming_model.generate_content(p, stream=True)
+
+            for chunk in first_stream:
+                usage_metadata = getattr(chunk, "usage_metadata", None)
+
+                # Check for function_call in the nested structure
+                function_call = None
+                if hasattr(chunk, "candidates"):
+                    candidate = chunk.candidates[0]
+                    if hasattr(candidate, "content") and hasattr(candidate.content, "parts"):
+                        for part in candidate.content.parts:
+                            if hasattr(part, "function_call"):
+                                function_call = part.function_call
+                                break
+                if function_call:
+                    print("[DEBUG] Function call detectada:")
+                    print(function_call)
+                    calls.append(function_call)
+                    continue  # importante: sigue iterando
+
+                if hasattr(chunk, "text") and chunk.text:
+                    print("========= Chunk ==========")
+                    print(chunk.text)
+                    yield chunk.text
+
+
             output_tokens = (
                 session.get("output_tokens", 0) + usage_metadata.candidates_token_count
             )
@@ -312,27 +328,33 @@ class AssistantController:
             debug_log = []
 
             # Procesar las llamadas a herramientas en paralelo, luego se agrupan los resultados en orden
-        
-            with ThreadPoolExecutor() as executor:
-                futures = [
-                    executor.submit(self.process_call, i, call)
-                    for i, call in enumerate(calls)
-                ]
-                results = [None] * len(futures)
-                for future in as_completed(futures):
-                    i, result_text, log = future.result()
-                    results[i] = (result_text, log)
-
-            for result_text, log in results:
-                tool_result_text += result_text
-                debug_log.append(log)
+            results = []
+            for i, call in enumerate(calls[0].args.get("calls")):
+                if call.get("source") == "pinecone":
+                    k_val = call.get("k_count", 5)
+                    results.append(
+                        consultController.search(
+                            query=call.get("article"),
+                            id=call.get("article_id"),
+                            document=call.get("document"),
+                            k_count=k_val,
+                        )
+                    )
+                if call.get("source") == "mongo_sentencias":
+                    results.append(
+                        consultController.search_mongo_sentencias(
+                            case_type=call.get("case_type"),
+                            user_request=msg,
+                        )
+                    )
+                   
 
             msgHistory.append(
                 Content(
                     role="tool",
                     parts=[
                         Part.from_text(
-                            tool_result_text + "\n[DEBUG] " + "; ".join(debug_log)
+                            tool_result_text +": "+ json.dumps(results)
                         )
                     ],
                 )
@@ -342,23 +364,16 @@ class AssistantController:
                 HISTORY=self.flatten_history(msgHistory),
                 FILE_DATA="",
             )
-            response = model.generate_content(prompt)
+            
+            second_stream = streaming_model.generate_content(prompt, stream=True)
+            botmsg = ""
+            for chunk in second_stream:
+                usage_metadata = getattr(chunk, "usage_metadata", None)
 
-            if hasattr(response, "candidates") and response.candidates:
-                parts = response.candidates[0].content.parts
-                # Esto previene errores cuando la respuesta incluye una llamada a herramienta (function_call) en lugar de texto
-                botmsg = ""
-                for part in parts:
-                    # Si el part es un diccionario con texto (estructura JSON)
-                    if isinstance(part, dict) and "text" in part:
-                        botmsg += part["text"]
-                    # Si el part es un objeto con atributo .text
-                    elif hasattr(part, "text"):
-                        botmsg += part.text
-                    # Si no contiene texto (ej. function_call), se ignora para evitar errores
-            else:
-                botmsg = "Respuesta generada por herramienta."
-
+                if hasattr(chunk, "text") and chunk.text:
+                    botmsg += chunk.text
+                    yield chunk.text
+                    
             botmsg_object = {
                 "role": "model",
                 "bot_response": botmsg,
