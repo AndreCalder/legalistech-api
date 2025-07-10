@@ -162,10 +162,18 @@ class AssistantController:
             )
 
         session = sessions.find_one({"_id": ObjectId(id)})
-        history = session.get("history", [])
+        if session is None:
+            history = []
+            session_output_tokens = 0
+            session_input_tokens = 0
+        else:
+            history = session.get("history", [])
+            session_output_tokens = session.get("output_tokens", 0)
+            session_input_tokens = session.get("input_tokens", 0)
+
         msgHistory = []
         file_data = ""
-        
+
         # Leer el mensaje y generar un titulo para la sesión (Guardar en DB)
 
         for message in history:
@@ -199,12 +207,14 @@ class AssistantController:
             tools=[search_tool],
         )
         streaming_model = GenerativeModel(
-        ASSISTANT_CONFIG["LLM"].get("STREAM_MODEL", ASSISTANT_CONFIG["LLM"]["MODEL"]),
-        system_instruction=ASSISTANT_CONFIG["LLM"]["SYSTEM_INSTRUCTION"],
-        generation_config=GenerationConfig(
-            temperature=ASSISTANT_CONFIG["LLM"]["TEMPERATURE"]
-        ),
-        tools=[search_tool],
+            ASSISTANT_CONFIG["LLM"].get(
+                "STREAM_MODEL", ASSISTANT_CONFIG["LLM"]["MODEL"]
+            ),
+            system_instruction=ASSISTANT_CONFIG["LLM"]["SYSTEM_INSTRUCTION"],
+            generation_config=GenerationConfig(
+                temperature=ASSISTANT_CONFIG["LLM"]["TEMPERATURE"]
+            ),
+            tools=[search_tool],
         )
         prompt_template = ASSISTANT_CONFIG["LLM"]["PROMPT"]
 
@@ -230,6 +240,7 @@ class AssistantController:
         estimated_token_cost = token_count_result.total_tokens
         current_balance, _, _ = tkbController.get_token_balance_raw(g.userId)
         token_equivalence = 500
+        botmsg = ""
 
         if (estimated_token_cost / token_equivalence) > current_balance:
             botmsg = "No cuentas con suficientes tokens para realizar esta acción."
@@ -251,6 +262,7 @@ class AssistantController:
 
             calls = []  # Acumularemos aquí todas las llamadas a herramientas
             usage_metadata = None
+            botmsg = ""  # Initialize botmsg here
 
             first_stream = streaming_model.generate_content(p, stream=True)
 
@@ -261,7 +273,9 @@ class AssistantController:
                 function_call = None
                 if hasattr(chunk, "candidates"):
                     candidate = chunk.candidates[0]
-                    if hasattr(candidate, "content") and hasattr(candidate.content, "parts"):
+                    if hasattr(candidate, "content") and hasattr(
+                        candidate.content, "parts"
+                    ):
                         for part in candidate.content.parts:
                             if hasattr(part, "function_call"):
                                 function_call = part.function_call
@@ -275,19 +289,20 @@ class AssistantController:
                 if hasattr(chunk, "text") and chunk.text:
                     print("========= Chunk ==========")
                     print(chunk.text)
+                    botmsg += chunk.text
                     yield chunk.text
+            print(botmsg)
 
-
-            output_tokens = (
-                session.get("output_tokens", 0) + usage_metadata.candidates_token_count
+            output_tokens = session_output_tokens + (
+                usage_metadata.candidates_token_count if usage_metadata else 0
             )
-            input_tokens = (
-                session.get("input_tokens", 0) + usage_metadata.prompt_token_count
+            input_tokens = session_input_tokens + (
+                usage_metadata.prompt_token_count if usage_metadata else 0
             )
             total_token_count = output_tokens + input_tokens
 
             print(f"[DEBUG] chatSession invocada con id: {id}")
-            
+
             # Diagnóstico: ¿cuántas llamadas a herramientas hizo el modelo?
             print(f"[DEBUG] Total de llamadas a herramientas: {len(calls)}")
 
@@ -329,51 +344,51 @@ class AssistantController:
 
             # Procesar las llamadas a herramientas en paralelo, luego se agrupan los resultados en orden
             results = []
-            for i, call in enumerate(calls[0].args.get("calls")):
-                if call.get("source") == "pinecone":
-                    k_val = call.get("k_count", 5)
-                    results.append(
-                        consultController.search(
-                            query=call.get("article"),
-                            id=call.get("article_id"),
-                            document=call.get("document"),
-                            k_count=k_val,
+            if len(calls) > 0:
+                for i, call in enumerate(calls[0].args.get("calls")):
+                    if call.get("source") == "pinecone":
+                        k_val = call.get("k_count", 5)
+                        results.append(
+                            consultController.search(
+                                query=call.get("article"),
+                                id=call.get("article_id"),
+                                document=call.get("document"),
+                                k_count=k_val,
+                            )
                         )
-                    )
-                if call.get("source") == "mongo_sentencias":
-                    results.append(
-                        consultController.search_mongo_sentencias(
-                            case_type=call.get("case_type"),
-                            user_request=msg,
+                    if call.get("source") == "mongo_sentencias":
+                        results.append(
+                            consultController.search_mongo_sentencias(
+                                case_type=call.get("case_type"),
+                                user_request=msg,
+                            )
                         )
-                    )
-                   
 
-            msgHistory.append(
-                Content(
-                    role="tool",
-                    parts=[
-                        Part.from_text(
-                            tool_result_text +": "+ json.dumps(results)
-                        )
-                    ],
+                msgHistory.append(
+                    Content(
+                        role="tool",
+                        parts=[
+                            Part.from_text(
+                                tool_result_text + ": " + json.dumps(results)
+                            )
+                        ],
+                    )
                 )
-            )
-            prompt = prompt_template.format(
-                MESSAGE="Aquí están los resultados de los artículos legales que solicitó. Redacta una respuesta clara y completa para el usuario.",
-                HISTORY=self.flatten_history(msgHistory),
-                FILE_DATA="",
-            )
-            
-            second_stream = streaming_model.generate_content(prompt, stream=True)
-            botmsg = ""
-            for chunk in second_stream:
-                usage_metadata = getattr(chunk, "usage_metadata", None)
+                prompt = prompt_template.format(
+                    MESSAGE="Aquí están los resultados de los artículos legales que solicitó. Redacta una respuesta clara y completa para el usuario.",
+                    HISTORY=self.flatten_history(msgHistory),
+                    FILE_DATA="",
+                )
 
-                if hasattr(chunk, "text") and chunk.text:
-                    botmsg += chunk.text
-                    yield chunk.text
-                    
+                second_stream = streaming_model.generate_content(prompt, stream=True)
+                botmsg = ""
+                for chunk in second_stream:
+                    usage_metadata = getattr(chunk, "usage_metadata", None)
+
+                    if hasattr(chunk, "text") and chunk.text:
+                        botmsg += chunk.text
+                        yield chunk.text
+
             botmsg_object = {
                 "role": "model",
                 "bot_response": botmsg,
@@ -383,7 +398,7 @@ class AssistantController:
             token_usage = total_token_count / token_equivalence
             tkbController.use_tokens(g.userId, token_usage)
 
-            updated_session = sessions.find_one_and_update(
+            sessions.find_one_and_update(
                 {"_id": ObjectId(id)},
                 {
                     "$push": {"history": {"$each": [message_obj, botmsg_object]}},

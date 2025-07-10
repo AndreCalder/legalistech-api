@@ -52,7 +52,6 @@ class ConsultController:
 
         # ✨ Búsqueda vectorial semántica
         embed_input = f"{query} en el contexto de {document}" if document and query else query or document
-        print(f"[DEBUG] PINECONE_EMBED INPUT → '{embed_input}'")
 
         query_embedding = pc.inference.embed(
             model="multilingual-e5-large",
