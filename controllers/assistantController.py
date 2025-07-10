@@ -3,7 +3,7 @@ import json
 import os
 from bson import ObjectId, json_util
 from flask import g, Response, stream_with_context
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from tempfile import NamedTemporaryFile
 from dotenv import load_dotenv
 from google.oauth2 import service_account
@@ -20,6 +20,12 @@ from controllers.consultController import ConsultController
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from mongoConnection import db
+
+# CST timezone (UTC-6)
+CST = timezone(timedelta(hours=-6))
+
+def get_cst_now():
+    return datetime.now(CST)
 
 # Inicializa credenciales para Vertex AI
 credentials = service_account.Credentials.from_service_account_file(
@@ -50,9 +56,9 @@ class AssistantController:
         body = request.json
         body["user_id"] = ObjectId(g.userId)
         body["history"] = []
-        body["name"] = "Sesión - " + datetime.now().strftime("%d/%m/%Y")
-        body["created_at"] = datetime.now()
-        body["updated_at"] = datetime.now()
+        body["name"] = "Sesión - " + get_cst_now().strftime("%d/%m/%Y")
+        body["created_at"] = get_cst_now()
+        body["updated_at"] = get_cst_now()
         savedSession = sessions.insert_one(body).inserted_id
         return str(savedSession)
 
@@ -89,7 +95,7 @@ class AssistantController:
         return json.loads(json_util.dumps(session)), 200
 
     def process_call(self, i, call):
-        start_time = datetime.now()
+        start_time = get_cst_now()
         local_tool_result = ""
         local_debug = ""
 
@@ -130,7 +136,7 @@ class AssistantController:
                 if owner_session:
                     reset_result, status = self.reset_session(session_id)
                     local_tool_result = f"\n[{i+1}] {reset_result.get('message')}\n---"
-                    duration = (datetime.now() - start_time).total_seconds()
+                    duration = (get_cst_now() - start_time).total_seconds()
                     local_debug = f"Llamada {i+1}: {duration:.2f}s"
                     return i, local_tool_result, local_debug
             local_tool_result = f"\n[{i+1}] Error: Permiso denegado o ID inválido.\n---"
@@ -138,7 +144,7 @@ class AssistantController:
         else:
             local_tool_result = f"\n[{i+1}] Función '{call.name}' no implementada.\n---"
 
-        duration = (datetime.now() - start_time).total_seconds()
+        duration = (get_cst_now() - start_time).total_seconds()
         local_debug = f"Llamada {i+1}: {duration:.2f}s"
         return i, local_tool_result, local_debug
 
@@ -149,7 +155,7 @@ class AssistantController:
         message_obj = {
             "role": "user",
             "user_question": msg,
-            "timestamp": datetime.now(),
+            "timestamp": get_cst_now(),
         }
 
         if uploaded_file:
@@ -247,7 +253,7 @@ class AssistantController:
             botmsg_object = {
                 "role": "model",
                 "bot_response": botmsg,
-                "timestamp": datetime.now(),
+                "timestamp": get_cst_now(),
             }
             sessions.find_one_and_update(
                 {"_id": ObjectId(id)},
@@ -291,7 +297,6 @@ class AssistantController:
                     print(chunk.text)
                     botmsg += chunk.text
                     yield chunk.text
-            print(botmsg)
 
             output_tokens = session_output_tokens + (
                 usage_metadata.candidates_token_count if usage_metadata else 0
@@ -392,7 +397,7 @@ class AssistantController:
             botmsg_object = {
                 "role": "model",
                 "bot_response": botmsg,
-                "timestamp": datetime.now(),
+                "timestamp": get_cst_now(),
             }
 
             token_usage = total_token_count / token_equivalence
