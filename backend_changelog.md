@@ -1,3 +1,46 @@
+📓 Changelog — Contact Form Integration with Mailchimp  
+📅 Date: 2025-07-03
+
+✅ Added
+
+📬 Mailchimp contact registration  
+- Added `controllers/mailchimpController.py` with:
+  - `MailchimpController` class to manage Mailchimp Marketing API interactions.
+  - `add_contact(...)` method to create contacts in the default Mailchimp list.
+  - `list_audiences(...)` helper method to fetch existing Mailchimp audiences and confirm list configuration.
+- Uses official `mailchimp_marketing` client with:
+  - `email_address`
+  - `merge_fields`: `FNAME`, `LNAME`, optional `PHONE`
+  - `status`: `"subscribed"`
+  - Optional `notes`: stores the user's message
+
+📨 Admin notification via email  
+- Reused `email_utils.py` to add:
+  - `notify_admin_new_contact(...)`: sends formatted HTML email to notify the admin of a new contact
+- Admin email address comes from `.env` (`MAILCHIMP_ADMIN_NOTIFY_EMAIL`)  
+- Email is sent using `MAIL_DEFAULT_SENDER` as the sender
+
+🌐 Contact API route  
+- Added `routes/contactBlueprint.py`, renamed its blueprint to `contact_Router`
+- Defined route: `POST /contact/contact`
+  - Accepts: `nombre`, `apellidos`, `email` (required), optional `telefono`, `mensaje`
+  - Validates required fields before processing
+  - On success: registers in Mailchimp and notifies the admin via email
+  - Returns:
+    - `400` if required fields are missing or Mailchimp responds with an error
+    - `500` on internal exceptions (e.g. email config missing)
+
+🧩 Router update  
+- Registered the contact route in `routes/router.py`:
+  ```python
+  from routes.contactBlueprint import contact_Router
+  router.register_blueprint(contact_Router, url_prefix="/contact")
+
+🧪 Environment configuration
+
+📝 Commit
+feat(contact): integrate Mailchimp contact registration, list lookup, and admin notification via email
+--------------------
 📓 Changelog — Multi-Tool Function Call Execution (Pinecone + Mongo)
 📅 Date: 06/06/2025
 
