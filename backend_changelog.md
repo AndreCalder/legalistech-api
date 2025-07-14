@@ -1,3 +1,64 @@
+📓 Changelog — Chat Session Management: Auto-Naming, Rename, Delete  
+📅 Date: 2025-07-14
+
+✅ Added
+
+🧠 Automatic session naming using Vertex AI  
+- Integrated `TITLE_GEN_ASSISTANT_CONFIG` using `gemini-1.5-flash` to generate session titles.
+- Added bilingual (ES/EN) `system_instruction` and prompt to contextualize user messages in legal chat.
+- Title generation is triggered when a new session receives its first message.
+- Context includes:
+  - `msg` (user message)
+  - Optional `file_data` from PDF or DOCX attachments
+- Result is saved to MongoDB in `sessions.name`.
+
+📝 Session renaming (manual)  
+- New endpoint: `POST /assistant/renameSession/<session_id>`
+  - JSON body:
+    ```json
+    {
+      "new_name": "Nuevo título de sesión"
+    }
+    ```
+  - Validates:
+    - User ownership of session
+    - `new_name` is not empty
+  - Updates `name` field in MongoDB
+  - Returns:
+    - `200` on success
+    - `404` if session not found
+    - `400` if name is invalid
+
+🗑️ Session deletion  
+- New endpoint: `DELETE /assistant/deleteSession/<session_id>`
+  - Deletes the session only if it belongs to the current user (`g.userId`)
+  - Returns:
+    - `200` on successful deletion
+    - `404` if session not found or not owned
+
+🧩 Controller updates  
+- `controllers/assistantController.py`:
+  - Added:
+    - `renameSession(session_id, request)`
+    - `deleteSession(session_id)`
+    - Title model instantiation with `TITLE_GEN_ASSISTANT_CONFIG`
+  - Refactored:
+    - `chatSession(...)` to support title generation only when session is new (`len(history) == 0`)
+    - Injection of file data into prompt context
+- `routes/assistantBlueprint.py`:
+  - Registered new routes:
+    ```python
+    @assistant_Router.post("/renameSession/<session_id>")
+    @assistant_Router.delete("/deleteSession/<session_id>")
+    ```
+
+🧪 Environment configuration  
+- Added `.env` variable references if needed for title model configuration.
+- Requires valid Vertex AI service key at: `controllers/util/service_key.json`.
+
+📝 Commit  
+feat(chat): add auto-naming with Vertex, session rename and delete endpoints
+----------------------
 📓 Changelog — Contact Form Integration with Mailchimp  
 📅 Date: 2025-07-03
 

@@ -9,7 +9,6 @@ class MailchimpController:
         self.api_key = os.getenv("MAILCHIMP_MARKETING_KEY")
         self.server_prefix = os.getenv("MAILCHIMP_SERVER_PREFIX")
         self.list_id = os.getenv("MAILCHIMP_LIST_ID")  # Audiencia default
-        print(self.list_id)
         self.client = MailchimpMarketing.Client()
         self.client.set_config({
             "api_key": self.api_key,

@@ -18,6 +18,10 @@ def validate_token():
 def create_session():
     return assistantController.createSession(request)
 
+@assistant_Router.route("/deletesession/<id>", methods=["DELETE"])
+def delete_session(id):
+    return assistantController.deleteSession(id)
+
 
 @assistant_Router.route("/getsessions/", methods=["GET"])
 def get_sessions():
@@ -40,3 +44,6 @@ def update_session(id):
 def send_msg(id):
     return assistantController.chatSession(id, request)
 
+@assistant_Router.route("/renameSession/<session_id>", methods=["POST"])
+def rename_session(session_id):
+    return AssistantController.renameSession(session_id, request)

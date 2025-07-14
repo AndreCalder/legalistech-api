@@ -14,6 +14,7 @@ from controllers.util.gcp_cloudvision import scan_pdf_to_text
 from controllers.util.toolkit_funcs import search_tool, clear_history
 from controllers.util.assistant_config import ASSISTANT_CONFIG
 from controllers.util.mongo_assistant_config import MONGO_ASSISTANT_CONFIG
+from controllers.util.title_gen_assistant_config import TITLE_GEN_ASSISTANT_CONFIG
 from controllers.eventController import EventController
 from controllers.token_balance_controller import Token_Balance_Controller
 from controllers.consultController import ConsultController
@@ -83,6 +84,17 @@ class AssistantController:
                 return {"message": "Session not found or already empty."}, 404
         except Exception as e:
             return {"error": f"Error resetting session: {str(e)}"}, 500
+        
+    def deleteSession(self, session_id):
+        try:
+            result = sessions.delete_one({"_id": ObjectId(session_id), "user_id": ObjectId(g.userId)})
+            if result.deleted_count > 0:
+                return {"message": "Sesión eliminada exitosamente."}, 200
+            else:
+                return {"message": "Sesión no encontrada o no pertenece al usuario."}, 404
+        except Exception as e:
+            return {"error": f"Error al eliminar sesión: {str(e)}"}, 500
+
 
     def getUserSessions(self):
         user_id = g.userId
@@ -181,6 +193,35 @@ class AssistantController:
         file_data = ""
 
         # Leer el mensaje y generar un titulo para la sesión (Guardar en DB)
+        # Generación de título si es una sesión nueva        
+        # Instanciar modelo para generación de título (debe ir ANTES de usarlo)
+        title_model = GenerativeModel(
+            model_name=TITLE_GEN_ASSISTANT_CONFIG["LLM"]["MODEL"],
+            system_instruction=TITLE_GEN_ASSISTANT_CONFIG["LLM"]["SYSTEM_INSTRUCTION"],
+            generation_config=GenerationConfig(
+                temperature=TITLE_GEN_ASSISTANT_CONFIG["LLM"]["TEMPERATURE"],
+                max_output_tokens=TITLE_GEN_ASSISTANT_CONFIG["LLM"]["MAX_TOKENS"],
+            ),
+        )
+
+        if len(history) == 0:
+            title_prompt = TITLE_GEN_ASSISTANT_CONFIG["LLM"]["PROMPT"].format(
+                MESSAGE=msg,
+                FILE_DATA=file_data or "",
+            )
+            try:
+                title_response = title_model.generate_content(title_prompt)
+                session_title = title_response.text.strip()
+
+                # Guarda el título generado en Mongo
+                sessions.update_one(
+                    {"_id": ObjectId(id)},
+                    {"$set": {"name": session_title}},
+                )
+                print(f"[INFO] Título generado para nueva sesión: {session_title}")
+            except Exception as e:
+                print(f"[WARN] No se pudo generar el título: {str(e)}")
+        # Fin lógica de generación de título 
 
         for message in history:
             if message.get("role") == "user":
@@ -222,6 +263,7 @@ class AssistantController:
             ),
             tools=[search_tool],
         )
+        
         prompt_template = ASSISTANT_CONFIG["LLM"]["PROMPT"]
 
         if uploaded_file and uploaded_file.filename:
@@ -416,5 +458,24 @@ class AssistantController:
                 upsert=True,
                 return_document=True,
             )
+        def renameSession(self, session_id, request):
+            try:
+                data = request.get_json()
+                new_name = data.get("new_name", "").strip()
+
+                if not new_name:
+                    return {"error": "El nuevo nombre no puede estar vacío."}, 400
+
+                result = sessions.update_one(
+                    {"_id": ObjectId(session_id), "user_id": ObjectId(g.userId)},
+                    {"$set": {"name": new_name, "updated_at": get_cst_now()}},
+                )
+
+                if result.modified_count == 1:
+                    return {"message": "Sesión renombrada exitosamente."}, 200
+                else:
+                    return {"error": "No se encontró la sesión o no pertenece al usuario."}, 404
+            except Exception as e:
+                return {"error": f"Error al renombrar sesión: {str(e)}"}, 500
 
         return Response(generate_response(prompt), mimetype="text/event-stream")
