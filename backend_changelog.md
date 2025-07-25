@@ -1,3 +1,107 @@
+📓 Changelog — Chat Session Management: Auto-Naming, Rename, Delete  
+📅 Date: 2025-07-14
+
+✅ Added
+
+🧠 Automatic session naming using Vertex AI  
+- Integrated `TITLE_GEN_ASSISTANT_CONFIG` using `gemini-1.5-flash` to generate session titles.
+- Added bilingual (ES/EN) `system_instruction` and prompt to contextualize user messages in legal chat.
+- Title generation is triggered when a new session receives its first message.
+- Context includes:
+  - `msg` (user message)
+  - Optional `file_data` from PDF or DOCX attachments
+- Result is saved to MongoDB in `sessions.name`.
+
+📝 Session renaming (manual)  
+- New endpoint: `POST /assistant/renameSession/<session_id>`
+  - JSON body:
+    ```json
+    {
+      "new_name": "Nuevo título de sesión"
+    }
+    ```
+  - Validates:
+    - User ownership of session
+    - `new_name` is not empty
+  - Updates `name` field in MongoDB
+  - Returns:
+    - `200` on success
+    - `404` if session not found
+    - `400` if name is invalid
+
+🗑️ Session deletion  
+- New endpoint: `DELETE /assistant/deleteSession/<session_id>`
+  - Deletes the session only if it belongs to the current user (`g.userId`)
+  - Returns:
+    - `200` on successful deletion
+    - `404` if session not found or not owned
+
+🧩 Controller updates  
+- `controllers/assistantController.py`:
+  - Added:
+    - `renameSession(session_id, request)`
+    - `deleteSession(session_id)`
+    - Title model instantiation with `TITLE_GEN_ASSISTANT_CONFIG`
+  - Refactored:
+    - `chatSession(...)` to support title generation only when session is new (`len(history) == 0`)
+    - Injection of file data into prompt context
+- `routes/assistantBlueprint.py`:
+  - Registered new routes:
+    ```python
+    @assistant_Router.post("/renameSession/<session_id>")
+    @assistant_Router.delete("/deleteSession/<session_id>")
+    ```
+
+🧪 Environment configuration  
+- Added `.env` variable references if needed for title model configuration.
+- Requires valid Vertex AI service key at: `controllers/util/service_key.json`.
+
+📝 Commit  
+feat(chat): add auto-naming with Vertex, session rename and delete endpoints
+----------------------
+📓 Changelog — Contact Form Integration with Mailchimp  
+📅 Date: 2025-07-03
+
+✅ Added
+
+📬 Mailchimp contact registration  
+- Added `controllers/mailchimpController.py` with:
+  - `MailchimpController` class to manage Mailchimp Marketing API interactions.
+  - `add_contact(...)` method to create contacts in the default Mailchimp list.
+  - `list_audiences(...)` helper method to fetch existing Mailchimp audiences and confirm list configuration.
+- Uses official `mailchimp_marketing` client with:
+  - `email_address`
+  - `merge_fields`: `FNAME`, `LNAME`, optional `PHONE`
+  - `status`: `"subscribed"`
+  - Optional `notes`: stores the user's message
+
+📨 Admin notification via email  
+- Reused `email_utils.py` to add:
+  - `notify_admin_new_contact(...)`: sends formatted HTML email to notify the admin of a new contact
+- Admin email address comes from `.env` (`MAILCHIMP_ADMIN_NOTIFY_EMAIL`)  
+- Email is sent using `MAIL_DEFAULT_SENDER` as the sender
+
+🌐 Contact API route  
+- Added `routes/contactBlueprint.py`, renamed its blueprint to `contact_Router`
+- Defined route: `POST /contact/contact`
+  - Accepts: `nombre`, `apellidos`, `email` (required), optional `telefono`, `mensaje`
+  - Validates required fields before processing
+  - On success: registers in Mailchimp and notifies the admin via email
+  - Returns:
+    - `400` if required fields are missing or Mailchimp responds with an error
+    - `500` on internal exceptions (e.g. email config missing)
+
+🧩 Router update  
+- Registered the contact route in `routes/router.py`:
+  ```python
+  from routes.contactBlueprint import contact_Router
+  router.register_blueprint(contact_Router, url_prefix="/contact")
+
+🧪 Environment configuration
+
+📝 Commit
+feat(contact): integrate Mailchimp contact registration, list lookup, and admin notification via email
+--------------------
 📓 Changelog — Multi-Tool Function Call Execution (Pinecone + Mongo)
 📅 Date: 06/06/2025
 

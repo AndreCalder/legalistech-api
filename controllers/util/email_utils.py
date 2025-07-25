@@ -43,3 +43,42 @@ def send_pin_email(to_email: str, pin_code: str, user_id: str):
     )
 
     mail.send(msg)
+
+
+def notify_admin_new_contact(name: str, last_name: str, email: str, phone: str, message_text: str):
+    admin_email = os.getenv("MAILCHIMP_ADMIN_NOTIFY_EMAIL", "test@milegalistech.com")
+
+    subject = "📬 Nuevo contacto desde el formulario de MiLegalistech"
+
+    html = f"""
+    <html>
+      <body style="font-family: Arial, sans-serif; padding: 20px; color: #333;">
+        <div style="max-width: 600px; margin: auto; background: #f9f9f9; padding: 30px; border-radius: 8px;">
+          <h2 style="color: #132956;">Nuevo contacto registrado</h2>
+          <p><strong>Nombre:</strong> {name} {last_name}</p>
+          <p><strong>Email:</strong> {email}</p>
+          <p><strong>Teléfono:</strong> {phone}</p>
+          <p><strong>Mensaje:</strong></p>
+          <blockquote style="background: #fff; padding: 15px; border-left: 5px solid #132956;">{message_text}</blockquote>
+        </div>
+      </body>
+    </html>
+    """
+
+    text = (
+        f"Nuevo contacto registrado:\n\n"
+        f"Nombre: {name} {last_name}\n"
+        f"Email: {email}\n"
+        f"Teléfono: {phone}\n"
+        f"Mensaje:\n{message_text}"
+    )
+
+    msg = Message(
+        subject=subject,
+        sender=os.getenv("MAIL_DEFAULT_SENDER"),
+        recipients=[admin_email],
+        body=text,
+        html=html
+    )
+
+    mail.send(msg)
