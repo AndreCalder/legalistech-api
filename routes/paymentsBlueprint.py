@@ -34,3 +34,45 @@ def validate_payment():
 @payment_Router.route("/webhook", methods=["POST"])
 def stripe_webhook():
     return stripeController.handle_stripe_event(request)
+
+@payment_Router.route("/get-payment-methods", methods=["GET"])
+def get_payment_methods():
+    return stripeController.get_payment_methods()
+
+@payment_Router.route("/refund-payment", methods=["POST"])
+def refund_payment():
+    data = request.json
+    payment_intent_id = data.get("payment_intent_id")
+    return stripeController.refund_payment(payment_intent_id)
+
+@payment_Router.route("/list-user-subscriptions", methods=["GET"])
+def list_user_subscriptions():
+    return stripeController.list_user_subscriptions()
+
+@payment_Router.route("/list-user-payments", methods=["GET"])
+def list_user_payments():
+    return stripeController.list_user_payments()
+
+@payment_Router.route("/update-payment-method", methods=["POST"])
+def update_payment_method():
+    data = request.json
+    payment_method_id = data.get("payment_method_id")
+    return stripeController.update_payment_method(payment_method_id)
+
+@payment_Router.route("/get-subscription-status", methods=["GET"])
+def get_subscription_status():
+    subscription_id = request.args.get("subscription_id")
+    return stripeController.get_subscription_status(subscription_id)
+
+@payment_Router.route("/detach-payment-method", methods=["POST"])
+def detach_payment_method():
+    data = request.json
+    payment_method_id = data.get("payment_method_id")
+    return stripeController.detach_payment_method(payment_method_id)
+
+@payment_Router.route("/change-subscription-plan", methods=["POST"])
+def change_subscription_plan():
+    data = request.json
+    subscription_id = data.get("subscription_id")
+    new_price_id = data.get("new_price_id")
+    return stripeController.change_subscription_plan(subscription_id, new_price_id)

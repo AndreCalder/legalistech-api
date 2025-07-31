@@ -1,6 +1,9 @@
 import bcrypt
 from controllers.token import TokenController
 from controllers.userController import UserController
+from mongoConnection import db
+
+authSessions = db["authSessions"]
 
 
 class AuthController:
@@ -9,7 +12,7 @@ class AuthController:
         self.token = TokenController()
         self.user = UserController()
 
-    def login(self, email: str, password: str):
+    def login(self, email: str, password: str, device: str, browser: str):
         """
         Authenticate by email and password.
         """
@@ -27,13 +30,18 @@ class AuthController:
         data = {
             "user_id": user.get("_id").get("$oid"),
             "email": user.get("email"),
+            "device": device,
+            "browser": browser,
         }
 
         access_token = self.token.create_access_token(data)
         refresh_token = self.token.create_refresh_token(data)
+        
+        data["access_token"] = access_token
+        data["refresh_token"] = refresh_token
+        authSessions.insert_one(data);
 
         return {
             "message": "Success",
-            "access_token": access_token,
-            "refresh_token": refresh_token,
+            "access_token": access_token
         }, 200

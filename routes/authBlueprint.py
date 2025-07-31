@@ -12,11 +12,13 @@ def login():
     req = request.json or {}
     email = req.get("email")
     pwd = req.get("password")
+    device = req.get("device")
+    browser = req.get("browser")
 
     if not email or not pwd:
         return {"message": "Authentication required"}, 400
 
-    return authController.login(email, pwd)
+    return authController.login(email, pwd, device, browser)
 
 
 @auth_Router.route("/validatetoken", methods=["POST"])

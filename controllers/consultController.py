@@ -17,13 +17,14 @@ load_dotenv()
 
 # 📚 Colección de sentencias judiciales
 sentencias = db["sentencias"]
-pc = Pinecone(api_key=os.getenv("PINECONE_API_KEY"))
-index = pc.Index("milegalista")
+
 
 
 class ConsultController:
     def __init__(self):
         self.sentencias = sentencias
+        self.pc = Pinecone(api_key=os.getenv("PINECONE_API_KEY"))
+        self.index = self.pc.Index("milegalista")
 
     def normalize_string(self, text: str) -> str:
         """
@@ -55,7 +56,7 @@ class ConsultController:
         # ✨ Búsqueda vectorial semántica
         embed_input = f"{query} en el contexto de {document}" if document and query else query or document
 
-        query_embedding = pc.inference.embed(
+        query_embedding = self.pc.inference.embed(
             model="multilingual-e5-large",
             inputs=[embed_input],
             parameters={"input_type": "query"},
@@ -68,7 +69,7 @@ class ConsultController:
             if norm_doc:
                 filter_query["documento"] = {"$eq": norm_doc}
 
-        results = index.query(
+        results = self.index.query(
             namespace="milegalista",
             vector=query_embedding[0].values,
             top_k=k_count,
@@ -158,11 +159,8 @@ class ConsultController:
         Recupera un artículo exacto desde Pinecone usando su ID directo.
         Usado para truncar búsquedas cuando solo se pide un artículo.
         """
-        pc = Pinecone(api_key=os.getenv("PINECONE_API_KEY"))
-        index = pc.Index("milegalista")
-
         try:
-            results = index.fetch(ids=[document_id], namespace="milegalista")
+            results = self.index.fetch(ids=[document_id], namespace="milegalista")
             match = results.vectors.get(document_id)
             if match:
                 print(f"[DEBUG] Documento encontrado por ID '{document_id}'.")
