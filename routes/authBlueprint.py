@@ -32,3 +32,34 @@ def validateToken():
         }, 200
 
     return {"message": "Session terminated"}, 400
+
+# Solicitar token de recuperación (via email)
+@auth_Router.route("/requestReset", methods=["POST"])
+def request_password_reset():
+    req = request.json or {}
+    email = req.get("email")
+
+    if not email:
+        return {"message": "Email is required"}, 400
+
+    user = tokenController.find_user_by_email(email)
+    if not user:
+        return {"message": "User not found"}, 404
+
+    token = tokenController.create_password_reset_token(user["_id"], user["email"])
+    # Puedes agregar aquí lógica para enviar el token por email
+
+    return {"message": "Token de recuperación generado", "token": token}, 200
+
+
+# Usar token y cambiar password
+@auth_Router.route("/resetPassword", methods=["POST"])
+def reset_password():
+    req = request.json or {}
+    token = req.get("token")
+    new_password = req.get("new_password")
+
+    if not token or not new_password:
+        return {"message": "Token and new password required"}, 400
+
+    return tokenController.verify_and_reset_password(token, new_password)

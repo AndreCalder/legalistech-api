@@ -1,3 +1,61 @@
+📓 Changelog — Password Reset + Mandrill Email Integration  
+📅 Date: 2025-08-07
+
+✅ Added
+
+🔐 Password reset via JWT token (30 min expiration)  
+- Token creation uses `RESET_TOKEN_SECRET` stored in `.env`.  
+- Token saved in MongoDB collection `password_reset_tokens` with fields:
+  - `token`
+  - `user_id`
+  - `used`
+  - `created_at`
+  - `expires_at`
+- Two endpoints added to `authBlueprint`:
+  - `POST /auth/requestReset`
+    - Body: `{ "email": "..." }`
+    - Generates reset token if user exists.
+  - `POST /auth/resetPassword`
+    - Body: `{ "token": "...", "new_password": "..." }`
+    - Verifies token and updates password.
+
+🧪 Password validation improvements  
+- Added bcrypt comparison in `verify_and_reset_password` to prevent reusing current password.
+
+🛠️ TokenController updates  
+- New methods:
+  - `find_user_by_email(email)`
+  - Updated `verify_and_reset_password(...)` to check token validity and current password reuse.
+- Reuses `_create_token()` internally for password reset token.
+
+📤 Migrated email sending to Mandrill (Mailchimp Transactional)  
+- `email_utils.py` refactored to use `requests.post(...)` with Mandrill API:
+  - Uses endpoint: `https://mandrillapp.com/api/1.0/messages/send.json`
+  - Requires `.env` variable: `MAILCHIMP_TRANSACTIONAL_KEY`
+  - Uses `MAIL_DEFAULT_SENDER` and `MAILCHIMP_ADMIN_NOTIFY_EMAIL` for from/reply
+
+- Two email functions updated:
+  - `send_pin_email(to_email, pin_code, user_id)`
+  - `notify_admin_new_contact(name, last_name, email, phone, message_text)`
+
+🧪 Postman test coverage  
+- `/auth/requestReset` → returns token if user exists  
+- `/auth/resetPassword` → resets password if token valid and unused  
+- `/contact/contact` → adds contact to Mailchimp and sends transactional email  
+- `/pins/` → sends PIN email to user using Mandrill  
+
+🧩 Other changes  
+- `.env` updated with:
+  RESET_TOKEN_SECRET=...
+  MAILCHIMP_TRANSACTIONAL_KEY=...
+  MAIL_DEFAULT_SENDER=notificaciones@milegalistech.ai
+  MAILCHIMP_ADMIN_NOTIFY_EMAIL=soporte@milegalistech.ai
+
+- `email_config.py` is now deprecated for SMTP-based config, but retained for future flexibility.
+
+📝 Commit  
+feat(auth+mail): password reset flow with JWT + migrate emails to Mandrill transactional
+-------------------------
 📓 Changelog — Chat Session Management: Auto-Naming, Rename, Delete  
 📅 Date: 2025-07-14
 

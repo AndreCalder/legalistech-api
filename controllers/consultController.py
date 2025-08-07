@@ -12,6 +12,8 @@ from mongoConnection import db
 from controllers.util.mongo_assistant_config import MONGO_ASSISTANT_CONFIG
 from google.oauth2 import service_account
 from vertexai.generative_models import GenerativeModel, GenerationConfig
+from dotenv import load_dotenv
+load_dotenv()
 
 # 📚 Colección de sentencias judiciales
 sentencias = db["sentencias"]
