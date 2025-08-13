@@ -2,7 +2,6 @@ import hashlib
 import os
 import mailchimp_marketing as MailchimpMarketing
 from mailchimp_marketing.api_client import ApiClientError
-from controllers.util.email_utils import notify_admin_new_contact  # asegúrate de que existe
 
 class MailchimpController:
     def __init__(self):
@@ -47,14 +46,6 @@ class MailchimpController:
             response = self.client.lists.add_list_member(self.list_id, member_info)
             print("Contacto registrado en Mailchimp:", response)
 
-            # Notifica al administrador por correo
-            notify_admin_new_contact(
-                name=first_name,
-                last_name=last_name,
-                email=email,
-                phone=phone or "No proporcionado",
-                message_text=note or "Sin mensaje"
-            )
 
             return True, response
 

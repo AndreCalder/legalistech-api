@@ -1,5 +1,7 @@
 from flask import Blueprint, request, jsonify
 from controllers.mailchimpController import MailchimpController
+from controllers.util.email_utils import notify_admin_new_contact
+
 
 contact_Router = Blueprint("contact", __name__)
 mailchimp = MailchimpController()
@@ -29,6 +31,13 @@ def handle_contact():
         )
 
         if success:
+            notify_admin_new_contact(
+                name=nombre,
+                last_name=apellidos,
+                email=email,
+                phone=telefono or "No proporcionado",
+                message_text=mensaje or "Sin mensaje"
+            )
             return jsonify({"message": "Contacto registrado correctamente"}), 200
         else:
             return jsonify({"error": f"Error desde Mailchimp: {result}"}), 400

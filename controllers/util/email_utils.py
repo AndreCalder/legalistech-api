@@ -1,6 +1,7 @@
-from flask_mail import Message
-from controllers.util.email_config import configure_mail, mail
+import mandrill
 import os
+
+mandrill_client = mandrill.Mandrill(os.getenv("MAILCHIMP_TRANSACTIONAL_KEY"))
 
 def send_pin_email(to_email: str, pin_code: str, user_id: str):
     link = f"{os.getenv('FRONTEND_VERIFY_URL', 'http://localhost:3000')}/verify?uid={user_id}"
@@ -34,15 +35,18 @@ def send_pin_email(to_email: str, pin_code: str, user_id: str):
         f"— Equipo Legalistech"
     )
 
-    msg = Message(
-        subject="Código de verificación de Legalistech",
-        sender=os.getenv("MAIL_DEFAULT_SENDER"),  # ✅ now loaded from .env
-        recipients=[to_email],
-        body=text,
-        html=html
-    )
+    message = {
+        "subject": "Código de verificación de Legalistech",
+        "from_email": os.getenv("MAIL_DEFAULT_SENDER"),
+        "to": [{"email": to_email, "type": "to"}],
+        "html": html,
+        "text": text,
+        "headers": {"Reply-To": os.getenv("MAIL_DEFAULT_SENDER")},
+        "auto_text": True
+    }
 
-    mail.send(msg)
+    return mandrill_client.messages.send(message=message)
+
 
 
 def notify_admin_new_contact(name: str, last_name: str, email: str, phone: str, message_text: str):
@@ -73,12 +77,15 @@ def notify_admin_new_contact(name: str, last_name: str, email: str, phone: str, 
         f"Mensaje:\n{message_text}"
     )
 
-    msg = Message(
-        subject=subject,
-        sender=os.getenv("MAIL_DEFAULT_SENDER"),
-        recipients=[admin_email],
-        body=text,
-        html=html
-    )
+    message = {
+        "subject": subject,
+        "from_email": os.getenv("MAIL_DEFAULT_SENDER"),
+        "to": [{"email": admin_email, "type": "to"}],
+        "html": html,
+        "text": text,
+        "headers": {"Reply-To": os.getenv("MAIL_DEFAULT_SENDER")},
+        "auto_text": True
+    }
 
-    mail.send(msg)
+    return mandrill_client.messages.send(message=message)
+

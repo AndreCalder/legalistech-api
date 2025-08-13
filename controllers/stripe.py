@@ -137,6 +137,7 @@ class StripeController:
                     updateData = {
                         "user_id": {"$oid": g.userId},
                         "monthly_tokens": tokens,
+                        "subscription_id": subscription_id,
                         "sub_date": dt,
                     }
                     userController.update_user(updateData)
@@ -155,6 +156,13 @@ class StripeController:
         except Exception as e:
             return jsonify(error=str(e)), 400
 
+    def cancel_subscription(self, subscription_id):
+        try:
+            stripe.Subscription.update(subscription_id, {"cancel_at_period_end": True})
+            return jsonify({"status": "success"}), 200
+        except Exception as e:
+            return jsonify(error=str(e)), 400
+
     def handle_stripe_event(self, request):
         payload = request.data
 
@@ -164,7 +172,108 @@ class StripeController:
             event = stripe.Webhook.construct_event(payload, sig_header, endpoint_secret)
             if event["type"] == "invoice.paid":
                 invoice = event["data"]["object"]
+            elif event["type"] == "subscription.canceled":
+                subscription = event["data"]["object"]
+                self.cancel_subscription(subscription["id"])
+            else:
+                return jsonify({"status": "success"}), 200
 
             return jsonify({"status": "success"}), 200
-        except stripe.error.SignatureVerificationError:
+        except Exception:
             return jsonify({"error": "Invalid signature"}), 400
+
+    def get_payment_methods(self):
+        try:
+            user = userController.get_user_byId(g.userId)
+            customer_id = user.get("customer_id")
+            if not customer_id:
+                return jsonify({"error": "No Stripe customer ID found for user"}), 404
+
+            payment_methods = stripe.PaymentMethod.list(
+                customer=customer_id,
+                type="card"
+            )
+            return jsonify({"payment_methods": payment_methods.data}), 200
+        except Exception as e:
+            return jsonify({"error": str(e)}), 400
+
+    def refund_payment(self, payment_intent_id):
+        try:
+            refund = stripe.Refund.create(payment_intent=payment_intent_id)
+            # Optionally update your DB here
+            return jsonify({"refund": refund}), 200
+        except Exception as e:
+            return jsonify({"error": str(e)}), 400
+
+    def list_user_subscriptions(self):
+        try:
+            user = userController.get_user_byId(g.userId)
+            customer_id = user.get("customer_id")
+            if not customer_id:
+                return jsonify({"error": "No Stripe customer ID found for user"}), 404
+            subscriptions = stripe.Subscription.list(customer=customer_id)
+            return jsonify({"subscriptions": subscriptions.data}), 200
+        except Exception as e:
+            return jsonify({"error": str(e)}), 400
+
+    def list_user_payments(self):
+        try:
+            user = userController.get_user_byId(g.userId)
+            customer_id = user.get("customer_id")
+            if not customer_id:
+                return jsonify({"error": "No Stripe customer ID found for user"}), 404
+            payment_intents_list = stripe.PaymentIntent.list(customer=customer_id)
+            return jsonify({"payment_intents": payment_intents_list.data}), 200
+        except Exception as e:
+            return jsonify({"error": str(e)}), 400
+
+    def update_payment_method(self, payment_method_id):
+        try:
+            user = userController.get_user_byId(g.userId)
+            customer_id = user.get("customer_id")
+            if not customer_id:
+                return jsonify({"error": "No Stripe customer ID found for user"}), 404
+            # Attach the payment method to the customer
+            payment_method = stripe.PaymentMethod.attach(
+                payment_method_id,
+                customer=customer_id,
+            )
+            # Set as default
+            stripe.Customer.modify(
+                customer_id,
+                invoice_settings={"default_payment_method": payment_method_id},
+            )
+            return jsonify({"payment_method": payment_method}), 200
+        except Exception as e:
+            return jsonify({"error": str(e)}), 400
+
+    def get_subscription_status(self, subscription_id):
+        try:
+            subscription = stripe.Subscription.retrieve(subscription_id)
+            return jsonify({"status": subscription.status, "subscription": subscription}), 200
+        except Exception as e:
+            return jsonify({"error": str(e)}), 400
+
+    def detach_payment_method(self, payment_method_id):
+        try:
+            payment_method = stripe.PaymentMethod.detach(payment_method_id)
+            return jsonify({"payment_method": payment_method}), 200
+        except Exception as e:
+            return jsonify({"error": str(e)}), 400
+
+    def change_subscription_plan(self, subscription_id, new_price_id):
+        try:
+            subscription = stripe.Subscription.retrieve(subscription_id)
+            current_item_id = subscription['items']['data'][0]['id']
+            updated_subscription = stripe.Subscription.modify(
+                subscription_id,
+                cancel_at_period_end=False,
+                proration_behavior='create_prorations',
+                items=[{
+                    'id': current_item_id,
+                    'price': new_price_id,
+                }],
+            )
+            return jsonify({"subscription": updated_subscription}), 200
+        except Exception as e:
+            return jsonify({"error": str(e)}), 400

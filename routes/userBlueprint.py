@@ -14,7 +14,7 @@ def validate_token():
     ):
         return
     token_data = tokenController.check_token(request.headers["Authorization"])
-
+    print(token_data)
     if not token_data.get("isValid"):
         return {"message": "Invalid token"}, 401
     print(token_data)

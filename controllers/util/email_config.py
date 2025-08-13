@@ -1,3 +1,4 @@
+"""
 import os
 from flask_mail import Mail
 
@@ -14,3 +15,4 @@ def configure_mail(app):
         MAIL_DEFAULT_SENDER=os.getenv("MAIL_DEFAULT_SENDER"),
     )
     mail.init_app(app)
+"""

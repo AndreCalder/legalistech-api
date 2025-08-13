@@ -11,7 +11,8 @@ docstring_parser==0.16
 Flask==3.1.0
 Flask-Cors==5.0.0
 Flask-Mailman==1.1.1
-Flask-Mail==0.10.0
+docopt==0.4.0 
+mandrill==1.0.60
 google-ai-generativelanguage==0.6.10
 google-api-core==2.23.0
 google-api-python-client==2.153.0
