@@ -27,10 +27,32 @@ class EnlaceController(EnlaceBase):
         )
 
     # Suggest related expedients based on filters (AI assistant)
-    def match_expedients(self, payload):
-        return jsonify(
-            self.make_request("asistente", method="POST", data=json.dumps(payload))
+    def get_expedients_by_binder(self, binder_id):
+        binder = binders.find_one({
+            "user_id": ObjectId(g.userId),
+            "carpeta_id": int(binder_id)  # ensure numeric match
+        })
+        if not binder:
+            return jsonify({"error": "Binder not found"}), 404
+
+        payload = {
+            "estado": binder["estado"],
+            "entidad": "estatal",
+            "carpeta_id": binder["carpeta_id"]
+        }
+
+        # POST + override GET, per Fiducia collection
+        response = self.make_request(
+            "carpetas/expedientes",
+            method="POST",
+            override="GET",
+            data=json.dumps(payload)
         )
+
+        if isinstance(response, dict) and response.get("error"):
+            return jsonify({"error": "Enlace error", "details": response}), 502
+
+        return jsonify(response)
 
     # Get list of states from Enlace
     def get_states(self):
@@ -78,8 +100,58 @@ class EnlaceController(EnlaceBase):
         )
 
     def get_binders(self):
-        user_binders = binders.find({"user_id": ObjectId(g.userId)})
-        return jsonify(json.loads(json_util.dumps(user_binders)))
+        # 1) Pull the user’s binders from Mongo
+        cursor = binders.find({"user_id": ObjectId(g.userId)}, {"_id": 0, "carpeta_id": 1, "estado": 1})
+        mongo_binders = list(cursor)
+
+        if not mongo_binders:
+            return jsonify([])  # no binders saved for this user
+
+        # 2) Group carpeta_ids by estado (Enlace requires estado to list)
+        by_estado = {}
+        for b in mongo_binders:
+            estado = b.get("estado")
+            carpeta_id = b.get("carpeta_id")
+            if estado is None or carpeta_id is None:
+                # skip malformed rows
+                continue
+            by_estado.setdefault(estado, set()).add(int(carpeta_id))
+
+        # 3) For each estado, call Enlace "Listar Carpetas" and filter by our carpeta_ids
+        matched = []
+
+        for estado, carpeta_ids in by_estado.items():
+            # Enlace wants POST with X-Http-Method-Override: GET
+            payload = {"estado": estado, "entidad": "estatal"}
+
+            # NOTE: we need a way to force POST + override GET. See make_request note below.
+            resp = self.make_request(
+                "carpetas",
+                method="GET",            # if your make_request actually sends GET, this may work
+                override="GET",
+                data=json.dumps(payload) # some servers ignore body on GET; safer to do POST+override
+            )
+
+            # Defend against API errors / shapes
+            if not isinstance(resp, dict):
+                continue
+
+            # Enlace response shape (per your Postman): {"carpetas": {"estatal": [ {...}, ... ]}}
+            estatales = (resp.get("carpetas") or {}).get("estatal") or []
+            if not isinstance(estatales, list):
+                continue
+
+            # 4) Keep only binders whose carpeta_id is in our user’s set
+            for c in estatales:
+                try:
+                    cid = int(c.get("carpeta_id"))
+                except (TypeError, ValueError):
+                    continue
+                if cid in carpeta_ids:
+                    matched.append(c)
+
+        return jsonify(matched)
+
 
     # Rename binder using Enlace API and update local copy
     def rename_binder(self, binder_id, payload):

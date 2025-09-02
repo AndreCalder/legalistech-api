@@ -49,11 +49,15 @@ def match_expedients():
 def create_binder():
     return enlaceController.create_binder(request.json)
 
-
 # Fetch all binders belonging to the user
 @enlace_Router.route("/binders", methods=["GET"])
 def get_binders():
     return enlaceController.get_binders()
+
+# List expedients inside a given binder
+@enlace_Router.route("/binders/<binder_id>/expedients", methods=["GET"])
+def get_expedients_by_binder(binder_id):
+    return enlaceController.get_expedients_by_binder(binder_id)
 
 
 # Rename binder via Enlace API + update in DB
